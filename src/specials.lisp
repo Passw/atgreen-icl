@@ -10,12 +10,14 @@
 ;;; Foreign Library Configuration
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-;;; Tell CFFI to not save osicat's library path in the image.
-;;; This allows libosicat.so to be found via ldconfig at runtime
-;;; instead of using the absolute build path.
-(let ((lib (gethash :libosicat cffi::*foreign-libraries*)))
-  (when lib
-    (setf (slot-value lib 'cffi::dont-save) t)))
+;;; Close osicat's foreign library before image is saved.
+;;; This prevents the absolute build path from being saved.
+;;; The library will be reopened at runtime via ldconfig.
+(uiop:register-image-dump-hook
+ (lambda ()
+   (let ((lib (gethash :libosicat cffi::*foreign-libraries*)))
+     (when (and lib (cffi:foreign-library-loaded-p lib))
+       (cffi:close-foreign-library lib)))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Version

@@ -30,6 +30,10 @@ helper commands to explore and evaluate Common Lisp code quickly.
 %autosetup
 
 %build
+# Fetch Lisp dependencies
+ocicl setup
+ocicl install
+
 # Build the executable image
 ASDF_SOURCE_REGISTRY='(:source-registry (:directory "./") (:tree "./ocicl/") :inherit-configuration)' \
   sbcl --eval "(asdf:make :icl)" --quit

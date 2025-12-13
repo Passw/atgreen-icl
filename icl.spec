@@ -31,7 +31,7 @@ helper commands to explore and evaluate Common Lisp code quickly.
 
 %build
 # Fetch Lisp dependencies
-ocicl setup
+ocicl setup > ~/.sbclrc
 ocicl install
 
 # Build the executable image

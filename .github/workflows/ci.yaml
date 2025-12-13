@@ -22,7 +22,7 @@ jobs:
           OCICL_RPM_URL=$(curl -sL https://api.github.com/repos/ocicl/ocicl/releases/latest | jq -r '.assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url')
           curl -sL "$OCICL_RPM_URL" -o /tmp/ocicl.rpm
           dnf install -y /tmp/ocicl.rpm
-          ocicl setup
+          ocicl setup > ~/.sbclrc
 
       - name: Fetch Lisp dependencies
         run: ocicl install

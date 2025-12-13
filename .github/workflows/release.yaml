@@ -22,6 +22,7 @@ jobs:
           OCICL_RPM_URL=$(curl -sL https://api.github.com/repos/ocicl/ocicl/releases/latest | jq -r '.assets[] | select(.name | endswith("x86_64.rpm")) | .browser_download_url')
           curl -sL "$OCICL_RPM_URL" -o /tmp/ocicl.rpm
           dnf install -y /tmp/ocicl.rpm
+          ocicl setup
 
       - name: Setup rpmbuild directory
         run: |
@@ -72,6 +73,7 @@ jobs:
           OCICL_DEB_URL=$(curl -sL https://api.github.com/repos/ocicl/ocicl/releases/latest | jq -r '.assets[] | select(.name | endswith("amd64.deb")) | .browser_download_url')
           curl -sL "$OCICL_DEB_URL" -o /tmp/ocicl.deb
           apt-get install -y /tmp/ocicl.deb
+          ocicl setup
 
       - name: Update changelog version
         run: |

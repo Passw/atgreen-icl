@@ -41,8 +41,10 @@ make
 # Collect licenses from vendored dependencies
 ocicl collect-licenses >VENDORED-LICENSES.txt
 
-# Install the binary
-install -D -m 0755 icl %{buildroot}%{_bindir}/icl
+# Install the binary and shared libraries from deploy output
+install -D -m 0755 bin/icl %{buildroot}%{_bindir}/icl
+mkdir -p %{buildroot}%{_libdir}/icl
+cp -r bin/*.so %{buildroot}%{_libdir}/icl/ 2>/dev/null || true
 
 # Install slynk from ocicl sly package
 mkdir -p %{buildroot}%{_datadir}/icl/slynk
@@ -56,6 +58,7 @@ install -D -m 0644 VENDORED-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{name
 %doc README.md
 %{_datadir}/licenses/%{name}/VENDORED-LICENSES.txt
 %{_datadir}/icl/slynk
+%{_libdir}/icl
 %{_bindir}/icl
 
 %changelog

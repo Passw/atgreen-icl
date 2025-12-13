@@ -34,5 +34,5 @@ jobs:
 
       - name: Test binary
         run: |
-          ./icl --version
-          ./icl --help
+          ./bin/icl --version
+          ./bin/icl --help

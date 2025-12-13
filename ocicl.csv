@@ -17,6 +17,8 @@ clingon, ghcr.io/ocicl/clingon@sha256:5d3babf7af5b0e7bfba2bfa9d384f70810ae6e538f
 clingon.demo, ghcr.io/ocicl/clingon@sha256:5d3babf7af5b0e7bfba2bfa9d384f70810ae6e538f899f0aba7e0b1308eee2eb, clingon-20251121-ef0528f/clingon.demo.asd
 clingon.intro, ghcr.io/ocicl/clingon@sha256:5d3babf7af5b0e7bfba2bfa9d384f70810ae6e538f899f0aba7e0b1308eee2eb, clingon-20251121-ef0528f/clingon.intro.asd
 clingon.test, ghcr.io/ocicl/clingon@sha256:5d3babf7af5b0e7bfba2bfa9d384f70810ae6e538f899f0aba7e0b1308eee2eb, clingon-20251121-ef0528f/clingon.test.asd
+deploy, ghcr.io/ocicl/deploy@sha256:088c79a20c36dc46364c2246f8744b9286204e53e2c31e842e49c19940a12124, deploy-20250813-5ccede9/deploy.asd
+deploy-test, ghcr.io/ocicl/deploy@sha256:088c79a20c36dc46364c2246f8744b9286204e53e2c31e842e49c19940a12124, deploy-20250813-5ccede9/test/deploy-test.asd
 global-vars, ghcr.io/ocicl/global-vars@sha256:d197e871c9c9abc4bf31b1186f5fd28f0ca848ebe2e9dddf2d82ecee01dbdc65, global-vars-20240503-c749f32/global-vars.asd
 global-vars-test, ghcr.io/ocicl/global-vars@sha256:d197e871c9c9abc4bf31b1186f5fd28f0ca848ebe2e9dddf2d82ecee01dbdc65, global-vars-20240503-c749f32/global-vars-test.asd
 idna, ghcr.io/ocicl/idna@sha256:b1737dbce42904f75c724350c3e057770c7777f1f5596c6358875dfb2e542eac, idna-20240503-bf789e6/idna.asd

@@ -13,11 +13,12 @@
 ;;; Close osicat's foreign library before image is saved.
 ;;; This prevents the absolute build path from being saved.
 ;;; The library will be reopened at runtime via ldconfig.
-(uiop:register-image-dump-hook
+#+sbcl
+(pushnew
  (lambda ()
-   (let ((lib (gethash :libosicat cffi::*foreign-libraries*)))
-     (when (and lib (cffi:foreign-library-loaded-p lib))
-       (cffi:close-foreign-library lib)))))
+   (ignore-errors
+     (cffi:close-foreign-library :libosicat)))
+ sb-ext:*save-hooks*)
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Version

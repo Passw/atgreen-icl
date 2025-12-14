@@ -13,7 +13,8 @@
 ;;; Close osicat's foreign library before image is saved.
 ;;; This prevents the absolute build path from being saved.
 ;;; The library will be reopened at runtime via ldconfig.
-#+sbcl
+;;; Only needed on POSIX systems where osicat is used.
+#+(and sbcl (not windows))
 (pushnew
  (lambda ()
    (ignore-errors

@@ -13,19 +13,21 @@
                :version-string
                ;; Input/Terminal
                :termp
-               :osicat
                :cffi
                ;; Slynk client
                :slynk-client
                ;; Utilities
                :alexandria
-               :split-sequence)
+               :split-sequence
+               ;; POSIX-only dependencies
+               (:feature (:not :windows) :osicat))
   :serial t
   :components ((:module "src"
                 :components
                 ((:file "package")
                  (:file "specials")
-                 (:file "terminal")
+                 (:file "terminal-posix" :if-feature (:not :windows))
+                 (:file "terminal-windows" :if-feature :windows)
                  (:file "buffer")
                  (:file "indent")
                  (:file "completion")

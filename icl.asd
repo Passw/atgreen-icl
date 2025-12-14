@@ -12,7 +12,6 @@
   :depends-on (:clingon
                :version-string
                ;; Input/Terminal
-               :linedit
                :termp
                :osicat
                :cffi

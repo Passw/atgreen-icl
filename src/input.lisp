@@ -15,15 +15,11 @@
   (and (termp:termp)
        (not (string= (uiop:getenv "TERM") "dumb"))))
 
-(defvar *use-multiline-editor* t
-  "If T, use the built-in multi-line editor. If NIL, use linedit.")
-
 (defun select-input-backend ()
   "Select appropriate input backend based on terminal capabilities."
-  (cond
-    ((not (terminal-capable-p)) :simple)
-    (*use-multiline-editor* :multiline)
-    (t :linedit)))
+  (if (terminal-capable-p)
+      :multiline
+      :simple))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Prompt Generation
@@ -43,8 +39,7 @@
   "Read input from user using appropriate backend.
    Returns input string or NIL on EOF."
   (case (select-input-backend)
-    (:linedit (read-with-linedit))
-    (:simple (read-simple))
+    (:multiline (read-with-multiline-editor))
     (otherwise (read-simple))))
 
 (defun read-simple ()
@@ -54,22 +49,6 @@
   (let ((line (read-line *standard-input* nil nil)))
     (when line
       (string-trim '(#\Space #\Tab) line))))
-
-(defun read-with-linedit ()
-  "Read input using linedit with line editing."
-  (handler-case
-      (let ((input (linedit:linedit
-                    :prompt (make-prompt)
-                    :history (namestring (history-file)))))
-        (when input
-          (string-trim '(#\Space #\Tab) input)))
-    ;; Handle EOF (Ctrl-D)
-    (end-of-file ()
-      nil)
-    ;; Handle linedit errors (e.g., no terminal) by falling back to simple
-    (error (e)
-      (declare (ignore e))
-      (read-simple))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Multi-line Input
@@ -92,14 +71,12 @@
     (case backend
       (:multiline
        (read-with-multiline-editor))
-      (:linedit
-       (read-with-linedit-continuation))
       (otherwise
        (read-with-simple-continuation)))))
 
 (defun read-with-multiline-editor ()
   "Read using the built-in multi-line editor.
-   Falls back to linedit-continuation if multiline editor fails to initialize."
+   Falls back to simple-continuation if multiline editor fails to initialize."
   (let ((result (multiline-edit
                  :prompt (make-prompt)
                  :continuation-prompt (make-continuation-prompt))))
@@ -108,37 +85,12 @@
        ;; User hit Ctrl-C, return empty to trigger abort restart
        "")
       ((eql result :not-a-tty)
-       ;; Not a real terminal, fall back to linedit or simple
-       (if (terminal-capable-p)
-           (read-with-linedit-continuation)
-           (read-with-simple-continuation)))
+       ;; Not a real terminal, fall back to simple
+       (read-with-simple-continuation))
       ((null result)
        ;; EOF
        nil)
       (t result))))
-
-(defun read-with-linedit-continuation ()
-  "Read using linedit with continuation prompts for incomplete forms."
-  (let ((lines nil)
-        (cont-prompt nil))
-    (loop
-      (let ((line (cond
-                    (lines
-                     (unless cont-prompt
-                       (setf cont-prompt (make-continuation-prompt)))
-                     (format t "~A" cont-prompt)
-                     (force-output)
-                     (read-line *standard-input* nil nil))
-                    (t
-                     (read-with-linedit)))))
-        (unless line
-          (return (if lines
-                      (format nil "~{~A~%~}" (nreverse lines))
-                      nil)))
-        (push line lines)
-        (let ((combined (format nil "~{~A~%~}" (nreverse (copy-list lines)))))
-          (when (input-complete-p combined)
-            (return combined)))))))
 
 (defun read-with-simple-continuation ()
   "Read using simple input with continuation prompts."

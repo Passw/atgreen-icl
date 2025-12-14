@@ -4,13 +4,8 @@
 	dh $@
 
 override_dh_auto_build:
-	ocicl setup > ~/.sbclrc
-	# Fetch Lisp dependencies (skip if already vendored in source tarball)
-	if [ ! -d ocicl ] || [ -z "$$(ls -A ocicl 2>/dev/null)" ]; then \
-		ocicl install; \
-	fi
+	# Dependencies are vendored in the source tarball
 	make
-	ocicl collect-licenses >VENDORED-LICENSES.txt
 
 override_dh_auto_install:
 	mkdir -p debian/icl/usr/bin
@@ -24,12 +19,11 @@ override_dh_auto_install:
 	cp -r ocicl/sly-*/* debian/icl/usr/share/icl/sly/
 	install -m 0644 README.md debian/icl/usr/share/doc/icl/
 	install -m 0644 LICENSE debian/icl/usr/share/doc/icl/
-	install -m 0644 VENDORED-LICENSES.txt debian/icl/usr/share/doc/icl/
+	install -m 0644 THIRD-PARTY-LICENSES.txt debian/icl/usr/share/doc/icl/
 
 override_dh_strip:
 	# Do not strip SBCL-based binaries as it corrupts the embedded core
 
 override_dh_auto_clean:
 	rm -f icl
-	rm -f VENDORED-LICENSES.txt
 	dh_auto_clean

@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: icl
 Upstream-Contact: Anthony Green <green@moxielogic.com>
-Source: https://github.com/ocicl/icl
+Source: https://github.com/atgreen/icl
 
 Files: *
 Copyright: 2025 Anthony Green <green@moxielogic.com>

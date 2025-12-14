@@ -171,12 +171,12 @@ jobs:
         run: make
 
       - name: Package Windows binary
+        shell: powershell
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p dist
-          cp icl.exe dist/
-          cp README.md LICENSE THIRD-PARTY-LICENSES.txt dist/
-          cd dist && zip ../icl-${VERSION}-windows-amd64.zip *
+          $VERSION = "${{ github.ref_name }}" -replace '^v', ''
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item icl.exe, README.md, LICENSE, THIRD-PARTY-LICENSES.txt -Destination dist/
+          Compress-Archive -Path dist/* -DestinationPath "icl-${VERSION}-windows-amd64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4

@@ -6,8 +6,7 @@ Build-Depends: debhelper-compat (= 13),
                sbcl,
                libfixposix-dev,
                gcc,
-               make,
-               ocicl
+               make
 Standards-Version: 4.6.2
 Homepage: https://github.com/atgreen/icl
 Vcs-Browser: https://github.com/atgreen/icl

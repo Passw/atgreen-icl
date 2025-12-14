@@ -189,14 +189,59 @@
 ;;; Value Printing
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defun format-result-string (str)
+  "Colorize a string representation of a Lisp value.
+   STR is the printed representation from the backend."
+  (if (not (and *colors-enabled* (terminal-capable-p)))
+      str
+      (cond
+        ;; Unreadable objects like #<PACKAGE ...>
+        ((and (>= (length str) 2)
+              (char= (char str 0) #\#)
+              (char= (char str 1) #\<))
+         (colorize str *color-dim*))
+        ;; NIL
+        ((string-equal str "NIL")
+         (colorize str *color-nil*))
+        ;; T
+        ((string-equal str "T")
+         (colorize str *color-t*))
+        ;; Keywords
+        ((and (plusp (length str))
+              (char= (char str 0) #\:))
+         (colorize str *color-keyword*))
+        ;; Strings (already quoted)
+        ((and (>= (length str) 2)
+              (char= (char str 0) #\"))
+         (colorize str *color-string*))
+        ;; Numbers (starts with digit or sign followed by digit)
+        ((and (plusp (length str))
+              (or (digit-char-p (char str 0))
+                  (and (>= (length str) 2)
+                       (member (char str 0) '(#\+ #\-))
+                       (digit-char-p (char str 1)))))
+         (colorize str *color-number*))
+        ;; Lists
+        ((and (plusp (length str))
+              (char= (char str 0) #\())
+         (colorize str *color-string*))
+        ;; Default
+        (t (colorize str *color-string*)))))
+
 (defun print-values (values)
-  "Print evaluation results with syntax highlighting."
+  "Print evaluation results with syntax highlighting.
+   VALUES is a list of strings (printed representations from backend)."
   (let ((prefix (colorize *result-prefix* *color-prefix*)))
     (cond
       ((null values)
        (format t "~&~A~A~%" prefix (colorize "; No values" *color-dim*)))
       ((= 1 (length values))
-       (format t "~&~A~A~%" prefix (format-value-colored (first values))))
+       (let ((v (first values)))
+         (format t "~&~A~A~%"
+                 prefix
+                 (if (stringp v)
+                     (format-result-string v)
+                     (format-value-colored v)))))
       (t
        ;; Multiple values
        (loop for v in values
@@ -204,7 +249,9 @@
              do (format t "~&~A~A ~A~%"
                         prefix
                         (colorize (format nil "[~D]" i) *color-dim*)
-                        (format-value-colored v)))))))
+                        (if (stringp v)
+                            (format-result-string v)
+                            (format-value-colored v))))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Banner

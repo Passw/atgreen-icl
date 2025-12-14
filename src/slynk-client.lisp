@@ -79,7 +79,8 @@
   ;; Wrap evaluation in error handling on the remote side
   ;; This prevents Slynk from entering debug mode and trying to notify Emacs
   ;; Also capture backtrace when error occurs
-  (let ((wrapper-code (format nil "(handler-case (list :ok (multiple-value-list (eval (read-from-string ~S)))) (error (err) (list :error (princ-to-string err) (ignore-errors #+sbcl (with-output-to-string (s) (sb-debug:print-backtrace :stream s :count 30)) #-sbcl nil))))" string)))
+  ;; Convert results to strings on remote side to avoid serialization issues with unreadable objects
+  (let ((wrapper-code (format nil "(handler-case (let ((vals (multiple-value-list (eval (read-from-string ~S))))) (list :ok (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals))) (error (err) (list :error (princ-to-string err) (ignore-errors #+sbcl (with-output-to-string (s) (sb-debug:print-backtrace :stream s :count 30)) #-sbcl nil))))" string)))
     (handler-case
         (let ((result (slynk-client:slime-eval
                        `(cl:eval (cl:read-from-string ,wrapper-code))

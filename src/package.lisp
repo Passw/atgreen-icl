@@ -23,6 +23,7 @@
    #:*config-file*
    #:*use-multiline-editor*
    #:*colors-enabled*
+   #:*syntax-highlighting-enabled*
 
    ;; Hooks
    #:*before-eval-hook*
@@ -52,7 +53,6 @@
    #:list-commands
 
    ;; Slynk/Backend configuration
-   #:*use-slynk*
    #:*slynk-port*
    #:*slynk-host*
    #:*default-lisp*

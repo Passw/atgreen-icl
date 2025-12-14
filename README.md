@@ -167,11 +167,32 @@ Example `~/.iclrc`:
   (asdf:load-system :my-project :force t))
 ```
 
+## Keyboard Shortcuts
+
+| Key | Description |
+|-----|-------------|
+| `Enter` | Submit form if complete, otherwise insert newline |
+| `Alt+Enter` | Always insert newline (works in most terminals) |
+| `Shift+Enter` | Always insert newline (requires kitty keyboard protocol) |
+| `Tab` | Complete symbol or show completion menu |
+| `Ctrl+A` / `Home` | Move to beginning of line |
+| `Ctrl+E` / `End` | Move to end of line |
+| `Ctrl+K` | Kill to end of line |
+| `Ctrl+U` | Clear entire line |
+| `Ctrl+L` | Clear screen |
+| `Ctrl+D` | EOF (exit if line empty) |
+| `Ctrl+C` | Cancel current input |
+| `Up/Down` | Navigate history (on first/last line) or move cursor |
+| `Alt+Q` | Reindent current form |
+
+**Note:** Use Alt+Enter in gnome-terminal and most other terminals. Shift+Enter only works in terminals with kitty keyboard protocol support (kitty, WezTerm, Alacritty, etc.).
+
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
 | `ICL_SLYNK_PATH` | Override path to Slynk directory |
+| `NO_COLOR` | When set to any non-empty value, disables colored output (see [no-color.org](https://no-color.org/)) |
 
 ## Architecture
 

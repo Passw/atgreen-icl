@@ -111,28 +111,71 @@
   "Render the buffer to the terminal, using *screen-row* to know current position."
   (let ((line-count (buffer-line-count buf))
         (cursor-row (edit-buffer-row buf))
-        (cursor-col (edit-buffer-col buf)))
+        (cursor-col (edit-buffer-col buf))
+        ;; Get full buffer content for multi-line highlighting
+        (full-content (buffer-contents buf))
+        ;; Get absolute cursor position for paren matching
+        (cursor-pos (buffer-cursor-position buf)))
     ;; Move up to line 0 from current screen position
     (when (plusp *screen-row*)
       (cursor-up *screen-row*))
     (cursor-to-column 1)
-    ;; Draw each line
-    (dotimes (i line-count)
-      (let ((prompt (buffer-prompt-for-line buf i))
-            (line (buffer-line buf i)))
-        (clear-line)
-        (format t "~A~A" prompt line)
-        (when (< i (1- line-count))
-          (format t "~%"))))
+    ;; Highlight the full content with cursor position for paren matching
+    (let* ((highlighted (highlight-string full-content cursor-pos))
+           (highlighted-lines (split-sequence:split-sequence #\Newline highlighted)))
+      ;; Draw each line
+      (dotimes (i line-count)
+        (let ((prompt (buffer-prompt-for-line buf i))
+              (hl-line (if (< i (length highlighted-lines))
+                           (nth i highlighted-lines)
+                           "")))
+          (clear-line)
+          (format t "~A~A" prompt hl-line)
+          (when (< i (1- line-count))
+            (format t "~%")))))
     ;; Clear any lines below (from previous longer input)
     (clear-below)
     ;; Position cursor at buffer position
     (let ((lines-to-go-up (- (1- line-count) cursor-row)))
       (when (plusp lines-to-go-up)
         (cursor-up lines-to-go-up)))
-    (let ((prompt-len (length (buffer-prompt-for-line buf cursor-row))))
+    (let ((prompt-len (visible-string-length (buffer-prompt-for-line buf cursor-row))))
       (cursor-to-column (+ prompt-len cursor-col 1)))
     ;; Update screen row tracking
+    (setf *screen-row* cursor-row)
+    (force-output)))
+
+(defun render-buffer-final (buf)
+  "Render the buffer without paren matching (for final display after submission)."
+  (let ((line-count (buffer-line-count buf))
+        (cursor-row (edit-buffer-row buf))
+        (cursor-col (edit-buffer-col buf))
+        (full-content (buffer-contents buf)))
+    ;; Move up to line 0 from current screen position
+    (when (plusp *screen-row*)
+      (cursor-up *screen-row*))
+    (cursor-to-column 1)
+    ;; Highlight without cursor position (no paren matching)
+    (let* ((highlighted (highlight-string full-content nil))
+           (highlighted-lines (split-sequence:split-sequence #\Newline highlighted)))
+      ;; Draw each line
+      (dotimes (i line-count)
+        (let ((prompt (buffer-prompt-for-line buf i))
+              (hl-line (if (< i (length highlighted-lines))
+                           (nth i highlighted-lines)
+                           "")))
+          (clear-line)
+          (format t "~A~A" prompt hl-line)
+          (when (< i (1- line-count))
+            (format t "~%")))))
+    ;; Clear any lines below
+    (clear-below)
+    ;; Position cursor at end
+    (let ((lines-to-go-up (- (1- line-count) cursor-row)))
+      (when (plusp lines-to-go-up)
+        (cursor-up lines-to-go-up)))
+    (let ((prompt-len (visible-string-length (buffer-prompt-for-line buf cursor-row))))
+      (cursor-to-column (+ prompt-len cursor-col 1)))
     (setf *screen-row* cursor-row)
     (force-output)))
 
@@ -142,10 +185,19 @@
          (col (edit-buffer-col buf))
          (prompt (buffer-prompt-for-line buf row))
          (line (buffer-line buf row))
-         (prompt-len (length prompt)))
+         (prompt-len (visible-string-length prompt))
+         ;; For accurate highlighting, we need full buffer context
+         (full-content (buffer-contents buf))
+         ;; Get cursor position for paren matching
+         (cursor-pos (buffer-cursor-position buf))
+         (highlighted (highlight-string full-content cursor-pos))
+         (highlighted-lines (split-sequence:split-sequence #\Newline highlighted))
+         (hl-line (if (< row (length highlighted-lines))
+                      (nth row highlighted-lines)
+                      line)))
     (cursor-to-column 1)
     (clear-line)
-    (format t "~A~A" prompt line)
+    (format t "~A~A" prompt hl-line)
     (cursor-to-column (+ prompt-len col 1))
     (force-output)))
 
@@ -336,13 +388,20 @@
            (progn
              (buffer-insert-newline buf)
              :newline))))  ; Special case - just need to show new line
-    ;; Navigation
+    ;; Shift+Enter or Alt+Enter - always insert newline (don't submit even if form is complete)
+    ((or (eql key :shift-enter)
+         (and (consp key)
+              (eql (first key) :alt)
+              (member (rest key) '(#\Return #\Newline) :test #'char=)))
+     (buffer-insert-newline buf)
+     :newline)
+    ;; Navigation - need full redraw for multi-line to update paren highlighting
     ((eql key :left)
      (buffer-move-left buf)
-     :continue)
+     (if (> (buffer-line-count buf) 1) :redraw :continue))
     ((eql key :right)
      (buffer-move-right buf)
-     :continue)
+     (if (> (buffer-line-count buf) 1) :redraw :continue))
     ((eql key :up)
      (if (zerop (edit-buffer-row buf))
          ;; At first line - try history
@@ -361,10 +420,10 @@
            :redraw)))
     ((eql key :home)
      (buffer-move-to-line-start buf)
-     :continue)
+     (if (> (buffer-line-count buf) 1) :redraw :continue))
     ((eql key :end)
      (buffer-move-to-line-end buf)
-     :continue)
+     (if (> (buffer-line-count buf) 1) :redraw :continue))
     ;; Deletion
     ((eql key :backspace)
      (if (buffer-delete-char-before buf)
@@ -394,7 +453,10 @@
     ;; Regular character
     ((characterp key)
      (buffer-insert-char buf key)
-     :continue)
+     ;; Need full redraw for multi-line to update paren highlighting on all lines
+     (if (> (buffer-line-count buf) 1)
+         :redraw
+         :continue))
     ;; Unknown - ignore
     (t :continue)))
 
@@ -425,7 +487,7 @@
              ;; Main loop
              (loop
                (let* ((key (read-key))
-                      (prompt-len (length (buffer-prompt-for-line buf (edit-buffer-row buf))))
+                      (prompt-len (visible-string-length (buffer-prompt-for-line buf (edit-buffer-row buf))))
                       ;; Check if completion menu is active
                       (menu-result (when (completion-menu-active-p)
                                      (handle-menu-key buf key)))
@@ -459,9 +521,9 @@
                     (when (completion-menu-active-p)
                       (clear-completion-menu 12)
                       (close-completion-menu))
-                    ;; Move to end, print newline, return contents
+                    ;; Move to end, render without paren matching, print newline
                     (buffer-move-to-end buf)
-                    (render-buffer buf)
+                    (render-buffer-final buf)
                     (format t "~%")
                     (force-output)
                     (let ((contents (buffer-contents buf)))
@@ -489,10 +551,8 @@
                     (when (completion-menu-active-p)
                       (clear-completion-menu 12)
                       (close-completion-menu))
-                    ;; Just started a new line - output newline and continuation prompt
-                    (format t "~%~A" (edit-buffer-continuation-prompt buf))
-                    (force-output)
-                    (setf *screen-row* (edit-buffer-row buf)))
+                    ;; Full redraw to update paren highlighting on all lines
+                    (render-buffer buf))
                    ((eql result :continue)
                     (render-current-line buf)
                     ;; Re-render menu if still active

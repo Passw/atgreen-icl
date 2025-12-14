@@ -8,7 +8,7 @@
   :description "Interactive Common Lisp: An enhanced REPL"
   :author      "Anthony Green <green@moxielogic.com>"
   :license     "MIT"
-  :version     "1.0.0"
+  :version     "1.1.0"
   :depends-on (:clingon
                :version-string
                ;; Input/Terminal
@@ -35,6 +35,7 @@
                  (:file "slynk-client")
                  (:file "backend")
                  (:file "output")
+                 (:file "highlight")
                  (:file "eval")
                  (:module "commands"
                   :components

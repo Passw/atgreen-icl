@@ -125,18 +125,31 @@
 (defvar *use-embedded-slynk* nil
   "If T, use embedded Slynk server. If NIL, try to find system Slynk.")
 
+(defun find-slynk-asd ()
+  "Find the slynk.asd file (ASDF system definition).
+   Returns the directory containing slynk.asd, or NIL."
+  ;; Check bundled location first (relative to slynk-loader.lisp)
+  (let ((loader (find-slynk-loader)))
+    (when loader
+      (let ((asd (merge-pathnames "slynk.asd" (uiop:pathname-directory-pathname loader))))
+        (when (probe-file asd)
+          (return-from find-slynk-asd (uiop:pathname-directory-pathname asd))))))
+  nil)
+
 (defun generate-slynk-init (port)
   "Generate Lisp code to load and start Slynk on PORT."
   (if *use-embedded-slynk*
       ;; Use our embedded minimal Slynk
       (generate-embedded-slynk-init port)
       ;; Try to find system Slynk
-      (let ((slynk-loader (find-slynk-loader)))
-        (if slynk-loader
-            ;; Use existing Slynk installation
+      (let ((slynk-dir (find-slynk-asd)))
+        (if slynk-dir
+            ;; Use ASDF to load Slynk (leverages FASL caching)
             (format nil "(progn
-  (load ~S)
-  (funcall (read-from-string \"slynk-loader:init\"))
+  (require :asdf)
+  (push ~S asdf:*central-registry*)
+  (let ((*debug-io* (make-broadcast-stream)))
+    (asdf:load-system :slynk))
   ;; Disable auth/secret expectations and SWANK->SLYNK translation
   (let ((secret (find-symbol \"SLY-SECRET\" :slynk)))
     (when secret (setf (symbol-function secret) (lambda () nil))))
@@ -146,7 +159,7 @@
     (when x (setf (symbol-value x) nil)))
   (funcall (read-from-string \"slynk:create-server\")
            :port ~D :dont-close t))"
-                    (namestring slynk-loader) port)
+                    (namestring slynk-dir) port)
             ;; Try Quicklisp
             (format nil "(progn
   (unless (find-package :quicklisp)
@@ -232,7 +245,6 @@
            (eval-arg (get-lisp-eval-arg lisp))
            (args (append (get-lisp-args lisp)
                          (list eval-arg init-code))))
-      (format t "~&; Starting ~A on port ~D...~%" lisp actual-port)
       #+sbcl
       (setf *inferior-process*
             (sb-ext:run-program program args
@@ -244,21 +256,24 @@
       #-sbcl
       (error "Process spawning not implemented for this Lisp")
       (setf *current-lisp* lisp)
-      ;; Wait for Slynk to start
-      (sleep 2)  ; Give it time to initialize
-      ;; Try to connect
-      (let ((attempts 0)
-            (max-attempts 10))
+      ;; Wait for Slynk to start with spinner
+      (let ((ticks 0)
+            (max-ticks 100)  ; 10 seconds max
+            (message (format nil "Starting ~A..." lisp)))
         (loop
-          (when (slynk-connect :port actual-port)
-            (return t))
-          (incf attempts)
-          (when (>= attempts max-attempts)
+          (show-spinner message)
+          (sleep 0.1)
+          (incf ticks)
+          ;; Try to connect after initial delay, then every 0.5s
+          (when (and (>= ticks 15)  ; First attempt after 1.5s
+                     (zerop (mod ticks 5)))
+            (when (slynk-connect :port actual-port)
+              (clear-spinner)
+              (return t)))
+          (when (>= ticks max-ticks)
+            (clear-spinner)
             (stop-inferior-lisp)
-            (error "Failed to connect to Slynk after ~D attempts" max-attempts))
-          (format t "~&; Waiting for Slynk to start (attempt ~D/~D)...~%"
-                  attempts max-attempts)
-          (sleep 1)))))))
+            (error "Failed to connect to Slynk after ~D seconds" (/ max-ticks 10)))))))))
 
 (defun stop-inferior-lisp ()
   "Stop the inferior Lisp process."
@@ -291,84 +306,41 @@
 ;;; Backend Interface
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-;; *use-slynk* is defined in specials.lisp
-
 (defun ensure-backend ()
-  "Ensure a Lisp backend is available.
-   If *use-slynk* is T, ensures Slynk connection.
-   Otherwise uses local evaluation."
-  (when (and *use-slynk* (not *slynk-connected-p*))
+  "Ensure a Lisp backend is available via Slynk."
+  (when (not *slynk-connected-p*)
     (unless (inferior-lisp-alive-p)
       (start-inferior-lisp))
     (unless *slynk-connected-p*
       (error "Cannot connect to Slynk backend"))))
 
 (defun backend-eval (string)
-  "Evaluate STRING using the current backend.
+  "Evaluate STRING using the Slynk backend.
    Returns (values result-values output-string)."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-eval-form string))
-    (t
-     ;; Local evaluation (original behavior)
-     (let ((form (read-form string)))
-       (run-before-eval-hooks form)
-       (let ((values (eval-form form)))
-         (update-history form values)
-         (run-after-eval-hooks form values)
-         (values values nil))))))
+  (ensure-backend)
+  (slynk-eval-form string))
 
 (defun backend-complete (prefix package)
-  "Get completions for PREFIX in PACKAGE using current backend."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-complete-simple prefix :package package))
-    (t
-     ;; Local completion (use existing completion functions)
-     (complete-symbol prefix (find-package package)))))
+  "Get completions for PREFIX in PACKAGE using Slynk backend."
+  (ensure-backend)
+  (slynk-complete-simple prefix :package package))
 
 (defun backend-documentation (name type)
-  "Get documentation for NAME of TYPE using current backend."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-documentation name type))
-    (t
-     ;; Local documentation
-     (documentation (find-symbol (string-upcase name) *icl-package*) type))))
+  "Get documentation for NAME of TYPE using Slynk backend."
+  (ensure-backend)
+  (slynk-documentation name type))
 
 (defun backend-describe (name)
-  "Describe NAME using current backend."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-describe name))
-    (t
-     ;; Local describe - capture output to string
-     (with-output-to-string (*standard-output*)
-       (describe (parse-symbol-arg name))))))
+  "Describe NAME using Slynk backend."
+  (ensure-backend)
+  (slynk-describe name))
 
 (defun backend-apropos (pattern)
-  "Search for symbols matching PATTERN using current backend."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-apropos pattern))
-    (t
-     ;; Local apropos
-     (apropos-list pattern))))
+  "Search for symbols matching PATTERN using Slynk backend."
+  (ensure-backend)
+  (slynk-apropos pattern))
 
 (defun backend-set-package (package-name)
-  "Change current package using current backend."
-  (cond
-    (*use-slynk*
-     (ensure-backend)
-     (slynk-set-package package-name))
-    (t
-     ;; Local package change
-     (let ((pkg (find-package (string-upcase package-name))))
-       (when pkg
-         (setf *icl-package* pkg)
-         pkg)))))
+  "Change current package using Slynk backend."
+  (ensure-backend)
+  (slynk-set-package package-name))

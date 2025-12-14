@@ -88,7 +88,6 @@
       (connect-str
        (multiple-value-bind (host port)
            (parse-connect-string connect-str)
-         (setf *use-slynk* t)
          (setf *slynk-host* host)
          (setf *slynk-port* port)
          (unless (slynk-connect :host host :port port)
@@ -96,7 +95,6 @@
            (uiop:quit 1))))
       ;; Start inferior Lisp with specified implementation
       (lisp-impl
-       (setf *use-slynk* t)
        (let ((impl (intern (string-upcase lisp-impl) :keyword)))
          (setf *default-lisp* impl)
          (handler-case
@@ -109,7 +107,6 @@
        (let ((impl (find-available-lisp)))
          (cond
            (impl
-            (setf *use-slynk* t)
             (setf *default-lisp* impl)
             (handler-case
                 (start-inferior-lisp :lisp impl)

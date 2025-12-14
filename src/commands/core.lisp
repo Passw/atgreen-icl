@@ -83,24 +83,16 @@
     (when (and (plusp (length pkg-name))
                (char= (char pkg-name 0) #\:))
       (setf pkg-name (subseq pkg-name 1)))
-    (if *use-slynk*
-        ;; Change package in both ICL and Slynk
-        (handler-case
-            (progn
-              (backend-set-package pkg-name)
-              (let ((pkg (find-package pkg-name)))
-                (when pkg
-                  (setf *icl-package* pkg)))
-              (format t "~&~A~%" pkg-name))
-          (error (e)
-            (format *error-output* "~&Failed to change package: ~A~%" e)))
-        ;; Local package change
-        (let ((pkg (find-package pkg-name)))
-          (if pkg
-              (progn
-                (setf *icl-package* pkg)
-                (format t "~&~A~%" (package-name pkg)))
-              (format *error-output* "~&Package not found: ~A~%" package-designator))))))
+    ;; Change package in both ICL and Slynk
+    (handler-case
+        (progn
+          (backend-set-package pkg-name)
+          (let ((pkg (find-package pkg-name)))
+            (when pkg
+              (setf *icl-package* pkg)))
+          (format t "~&~A~%" pkg-name))
+      (error (e)
+        (format *error-output* "~&Failed to change package: ~A~%" e)))))
 
 (define-command pwd ()
   "Show the current package."
@@ -175,16 +167,11 @@ Optional filter: functions, macros, variables, classes, all, external, internal"
   "Show ICL session information."
   (format t "~&ICL Information:~%")
   (format t "  Version:        ~A~%" +version+)
-  (if *use-slynk*
-      (progn
-        (format t "  Backend:        Slynk (~A)~%"
-                (if *slynk-connected-p* "connected" "disconnected"))
-        (when *current-lisp*
-          (format t "  Inferior Lisp:  ~A~%" *current-lisp*))
-        (format t "  Slynk host:     ~A:~D~%" *slynk-host* *slynk-port*))
-      (format t "  Backend:        Local (~A ~A)~%"
-              (lisp-implementation-type)
-              (lisp-implementation-version)))
+  (format t "  Backend:        Slynk (~A)~%"
+          (if *slynk-connected-p* "connected" "disconnected"))
+  (when *current-lisp*
+    (format t "  Inferior Lisp:  ~A~%" *current-lisp*))
+  (format t "  Slynk host:     ~A:~D~%" *slynk-host* *slynk-port*)
   (format t "  Package:        ~A~%" (package-name *icl-package*))
   (format t "  History file:   ~A~%" (history-file))
   (format t "  Input count:    ~A~%" *input-count*)
@@ -201,10 +188,9 @@ Example: ,lisp ccl"
         (handler-case
             (progn
               ;; Stop current inferior if running
-              (when (and *use-slynk* (inferior-lisp-alive-p))
+              (when (inferior-lisp-alive-p)
                 (stop-inferior-lisp))
               ;; Start new one
-              (setf *use-slynk* t)
               (start-inferior-lisp :lisp impl)
               (format t "~&Switched to ~A~%" impl))
           (error (e)
@@ -212,7 +198,6 @@ Example: ,lisp ccl"
       ;; Show current backend
       (format t "~&Backend: ~A~%"
               (cond
-                ((not *use-slynk*) "local")
                 (*current-lisp* *current-lisp*)
                 (*slynk-connected-p* (format nil "Slynk at ~A:~D" *slynk-host* *slynk-port*))
                 (t "none")))))
@@ -243,128 +228,72 @@ Example: ,lisp ccl"
 (define-command (doc d) (symbol-name)
   "Show documentation for a symbol.
 Example: ,doc format"
-  (if *use-slynk*
-      ;; Use Slynk backend for documentation
-      (handler-case
-          (let ((doc (backend-documentation symbol-name 'function)))
-            (if (and doc (not (string= doc "")))
-                (format t "~&~A~%" doc)
-                (let ((var-doc (backend-documentation symbol-name 'variable)))
-                  (if (and var-doc (not (string= var-doc "")))
-                      (format t "~&~A~%" var-doc)
-                      (format *error-output* "~&No documentation found for: ~A~%" symbol-name)))))
-        (error (e)
-          (format *error-output* "~&Error getting documentation: ~A~%" e)))
-      ;; Local documentation
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if sym
-            (show-documentation sym)
-            (format *error-output* "~&Symbol not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((doc (backend-documentation symbol-name 'function)))
+        (if (and doc (not (string= doc "")))
+            (format t "~&~A~%" doc)
+            (let ((var-doc (backend-documentation symbol-name 'variable)))
+              (if (and var-doc (not (string= var-doc "")))
+                  (format t "~&~A~%" var-doc)
+                  (format *error-output* "~&No documentation found for: ~A~%" symbol-name)))))
+    (error (e)
+      (format *error-output* "~&Error getting documentation: ~A~%" e))))
 
 (define-command (apropos ap) (pattern)
   "Search for symbols matching a pattern.
 Example: ,apropos string"
-  (if *use-slynk*
-      ;; Use Slynk backend for apropos
-      (handler-case
-          (let ((matches (backend-apropos pattern)))
-            (if matches
-                (progn
-                  (format t "~&~D symbols matching \"~A\":~%" (length matches) pattern)
-                  ;; Slynk returns structured data
-                  (let ((display (if (> (length matches) 50)
-                                     (subseq matches 0 50)
-                                     matches)))
-                    (dolist (item display)
-                      ;; Item format: (:designator "pkg:name" :function/:variable/etc)
-                      (if (listp item)
-                          (format t "  ~A~%" (getf item :designator))
-                          (format t "  ~A~%" item)))
-                    (when (> (length matches) 50)
-                      (format t "  ... and ~D more~%" (- (length matches) 50)))))
-                (format t "~&No symbols matching \"~A\"~%" pattern)))
-        (error (e)
-          (format *error-output* "~&Error in apropos: ~A~%" e)))
-      ;; Local apropos
-      (let ((matches (apropos-list pattern)))
+  (handler-case
+      (let ((matches (backend-apropos pattern)))
         (if matches
             (progn
               (format t "~&~D symbols matching \"~A\":~%" (length matches) pattern)
-              (let ((sorted (sort (copy-list matches) #'string< :key #'symbol-name)))
-                ;; Limit output for very long lists
-                (let ((display (if (> (length sorted) 50)
-                                   (subseq sorted 0 50)
-                                   sorted)))
-                  (dolist (sym display)
-                    (format t "  ~A:~A~A~%"
-                            (package-name (symbol-package sym))
-                            (string-downcase (symbol-name sym))
-                            (symbol-type-indicator sym)))
-                  (when (> (length sorted) 50)
-                    (format t "  ... and ~D more~%" (- (length sorted) 50))))))
-            (format t "~&No symbols matching \"~A\"~%" pattern)))))
+              ;; Slynk returns structured data
+              (let ((display (if (> (length matches) 50)
+                                 (subseq matches 0 50)
+                                 matches)))
+                (dolist (item display)
+                  ;; Item format: (:designator "pkg:name" :function/:variable/etc)
+                  (if (listp item)
+                      (format t "  ~A~%" (getf item :designator))
+                      (format t "  ~A~%" item)))
+                (when (> (length matches) 50)
+                  (format t "  ... and ~D more~%" (- (length matches) 50)))))
+            (format t "~&No symbols matching \"~A\"~%" pattern)))
+    (error (e)
+      (format *error-output* "~&Error in apropos: ~A~%" e))))
 
 (define-command (describe desc) (symbol-name)
   "Show full description of a symbol.
 Example: ,describe format"
-  (if *use-slynk*
-      ;; Use Slynk backend for describe
-      (handler-case
-          (let ((desc (backend-describe symbol-name)))
-            (if (and desc (not (string= desc "")))
-                (format t "~&~A~%" desc)
-                (format *error-output* "~&No description for: ~A~%" symbol-name)))
-        (error (e)
-          (format *error-output* "~&Error describing symbol: ~A~%" e)))
-      ;; Local describe
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if sym
-            (describe sym)
-            (format *error-output* "~&Symbol not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((desc (backend-describe symbol-name)))
+        (if (and desc (not (string= desc "")))
+            (format t "~&~A~%" desc)
+            (format *error-output* "~&No description for: ~A~%" symbol-name)))
+    (error (e)
+      (format *error-output* "~&Error describing symbol: ~A~%" e))))
 
 (define-command (macroexpand mx) (form-string)
   "Expand a macro form once.
 Example: ,macroexpand (when t 1)"
-  (if *use-slynk*
-      ;; Use Slynk backend for macroexpand
-      (handler-case
-          (let ((expanded (slynk-macroexpand form-string)))
-            (if expanded
-                (format t "~&~A~%" expanded)
-                (format *error-output* "~&Macroexpand returned nil~%")))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))
-      ;; Local macroexpand
-      (handler-case
-          (let* ((form (read-from-string form-string))
-                 (expanded (macroexpand-1 form)))
-            (format t "~&")
-            (pprint expanded)
-            (format t "~%"))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))))
+  (handler-case
+      (let ((expanded (slynk-macroexpand form-string)))
+        (if expanded
+            (format t "~&~A~%" expanded)
+            (format *error-output* "~&Macroexpand returned nil~%")))
+    (error (e)
+      (format *error-output* "~&Error: ~A~%" e))))
 
 (define-command (macroexpand-all mxa) (form-string)
   "Fully expand all macros in a form.
 Example: ,macroexpand-all (when t (unless nil 1))"
-  (if *use-slynk*
-      ;; Use Slynk backend for macroexpand-all
-      (handler-case
-          (let ((expanded (slynk-macroexpand-all form-string)))
-            (if expanded
-                (format t "~&~A~%" expanded)
-                (format *error-output* "~&Macroexpand-all returned nil~%")))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))
-      ;; Local macroexpand-all
-      (handler-case
-          (let* ((form (read-from-string form-string))
-                 (expanded (macroexpand-all-form form)))
-            (format t "~&")
-            (pprint expanded)
-            (format t "~%"))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))))
+  (handler-case
+      (let ((expanded (slynk-macroexpand-all form-string)))
+        (if expanded
+            (format t "~&~A~%" expanded)
+            (format *error-output* "~&Macroexpand-all returned nil~%")))
+    (error (e)
+      (format *error-output* "~&Error: ~A~%" e))))
 
 (defun parse-symbol-arg (string)
   "Parse STRING as a symbol reference. Returns the symbol or NIL."
@@ -471,26 +400,13 @@ Example: ,macroexpand-all (when t (unless nil 1))"
 (define-command (arglist args) (symbol-name)
   "Show the argument list for a function or macro.
 Example: ,arglist format"
-  (if *use-slynk*
-      ;; Use Slynk backend for arglist
-      (handler-case
-          (let ((arglist (slynk-arglist symbol-name)))
-            (if arglist
-                (format t "~&(~A ~A)~%" (string-downcase symbol-name) arglist)
-                (format *error-output* "~&No arglist found for: ~A~%" symbol-name)))
-        (error (e)
-          (format *error-output* "~&Error getting arglist: ~A~%" e)))
-      ;; Local arglist
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if (and sym (fboundp sym))
-            (let ((arglist (get-arglist sym)))
-              (if arglist
-                  (format t "~&(~A ~{~A~^ ~})~%"
-                          (string-downcase (symbol-name sym))
-                          (mapcar #'string-downcase
-                                  (mapcar #'princ-to-string arglist)))
-                  (format *error-output* "~&No arglist available for: ~A~%" symbol-name)))
-            (format *error-output* "~&Function not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((arglist (slynk-arglist symbol-name)))
+        (if arglist
+            (format t "~&(~A ~A)~%" (string-downcase symbol-name) arglist)
+            (format *error-output* "~&No arglist found for: ~A~%" symbol-name)))
+    (error (e)
+      (format *error-output* "~&Error getting arglist: ~A~%" e))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Inspection
@@ -500,21 +416,13 @@ Example: ,arglist format"
   "Inspect the result of evaluating an expression.
 Example: ,inspect *package*
 Example: ,inspect (make-hash-table)"
-  (if *use-slynk*
-      ;; Use Slynk backend for inspection
-      (handler-case
-          (let ((inspection (slynk-inspect expr-string)))
-            (if inspection
-                (format-inspection inspection)
-                (format *error-output* "~&No inspection result~%")))
-        (error (e)
-          (format *error-output* "~&Error inspecting: ~A~%" e)))
-      ;; Local inspection
-      (handler-case
-          (let ((value (eval (read-from-string expr-string))))
-            (inspect value))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))))
+  (handler-case
+      (let ((inspection (slynk-inspect expr-string)))
+        (if inspection
+            (format-inspection inspection)
+            (format *error-output* "~&No inspection result~%")))
+    (error (e)
+      (format *error-output* "~&Error inspecting: ~A~%" e))))
 
 (defun slynk-inspect (expr-string)
   "Inspect expression via Slynk, returns inspection result."
@@ -552,9 +460,7 @@ Example: ,inspect (make-hash-table)"
 Example: ,slots (find-class 'standard-class)
 Example: ,slots *package*"
   (handler-case
-      (let ((value (if *use-slynk*
-                       (first (backend-eval expr-string))
-                       (eval (read-from-string expr-string)))))
+      (let ((value (first (backend-eval expr-string))))
         (if (typep value 'standard-object)
             (show-object-slots value)
             (format *error-output* "~&Not a standard-object: ~S~%" value)))
@@ -587,21 +493,14 @@ Example: ,slots *package*"
 (define-command source (symbol-name)
   "Show the source location of a function or macro.
 Example: ,source my-function"
-  (if *use-slynk*
-      ;; Use Slynk backend for source location
-      (handler-case
-          (let ((locations (slynk-find-definitions symbol-name)))
-            (if locations
-                (dolist (loc locations)
-                  (format-source-location loc))
-                (format *error-output* "~&No source location found for: ~A~%" symbol-name)))
-        (error (e)
-          (format *error-output* "~&Error finding source: ~A~%" e)))
-      ;; Local source lookup (SBCL-specific)
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if sym
-            (show-source-location sym)
-            (format *error-output* "~&Symbol not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((locations (slynk-find-definitions symbol-name)))
+        (if locations
+            (dolist (loc locations)
+              (format-source-location loc))
+            (format *error-output* "~&No source location found for: ~A~%" symbol-name)))
+    (error (e)
+      (format *error-output* "~&Error finding source: ~A~%" e))))
 
 (defun slynk-find-definitions (name)
   "Find definitions for NAME via Slynk."
@@ -680,52 +579,29 @@ Example: ,source my-function"
 (define-command (trace tr) (symbol-name)
   "Enable tracing for a function.
 Example: ,trace my-function"
-  (if *use-slynk*
-      ;; Use Slynk backend for tracing
-      (handler-case
-          (let ((result (slynk-toggle-trace symbol-name)))
-            (format t "~&~A~%" result))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))
-      ;; Local trace
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if (and sym (fboundp sym))
-            (progn
-              (eval `(trace ,sym))
-              (format t "~&Tracing ~A~%" (string-downcase (symbol-name sym))))
-            (format *error-output* "~&Function not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((result (slynk-toggle-trace symbol-name)))
+        (format t "~&~A~%" result))
+    (error (e)
+      (format *error-output* "~&Error: ~A~%" e))))
 
 (define-command (untrace untr) (symbol-name)
   "Disable tracing for a function.
 Example: ,untrace my-function"
-  (if *use-slynk*
-      ;; Use Slynk backend to untrace
-      (handler-case
-          (let ((result (slynk-untrace symbol-name)))
-            (format t "~&~A~%" result))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))
-      ;; Local untrace
-      (let ((sym (parse-symbol-arg symbol-name)))
-        (if (and sym (fboundp sym))
-            (progn
-              (eval `(untrace ,sym))
-              (format t "~&Untracing ~A~%" (string-downcase (symbol-name sym))))
-            (format *error-output* "~&Function not found: ~A~%" symbol-name)))))
+  (handler-case
+      (let ((result (slynk-untrace symbol-name)))
+        (format t "~&~A~%" result))
+    (error (e)
+      (format *error-output* "~&Error: ~A~%" e))))
 
 (define-command (untrace-all untr-all) ()
   "Disable all tracing.
 Example: ,untrace-all"
-  (if *use-slynk*
-      (handler-case
-          (let ((result (slynk-untrace-all)))
-            (format t "~&~A~%" result))
-        (error (e)
-          (format *error-output* "~&Error: ~A~%" e)))
-      ;; Local untrace-all
-      (progn
-        (untrace)
-        (format t "~&All tracing disabled~%"))))
+  (handler-case
+      (let ((result (slynk-untrace-all)))
+        (format t "~&~A~%" result))
+    (error (e)
+      (format *error-output* "~&Error: ~A~%" e))))
 
 (defun slynk-toggle-trace (name)
   "Toggle tracing for NAME via Slynk."

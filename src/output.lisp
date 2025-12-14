@@ -10,8 +10,13 @@
 ;;; ANSI Colors
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defvar *colors-enabled* t
-  "Enable/disable colored output.")
+(defun no-color-p ()
+  "Return T if NO_COLOR environment variable is set and non-empty."
+  (let ((val (uiop:getenv "NO_COLOR")))
+    (and val (plusp (length val)))))
+
+(defvar *colors-enabled* (not (no-color-p))
+  "Enable/disable colored output. Defaults to T unless NO_COLOR is set.")
 
 (defvar *color-reset* (format nil "~C[0m" #\Escape))
 (defvar *color-bold* (format nil "~C[1m" #\Escape))
@@ -35,12 +40,70 @@
 (defvar *color-list* (format nil "~C[38;5;252m" #\Escape))     ; Light gray
 (defvar *color-error* (format nil "~C[38;5;196m" #\Escape))    ; Bright red
 (defvar *color-prefix* (format nil "~C[38;5;244m" #\Escape))   ; Gray for =>
+(defvar *color-prompt* (format nil "~C[38;5;240m" #\Escape))   ; Dark gray for prompt
 
 (defun colorize (text color)
   "Wrap TEXT with COLOR codes if colors are enabled."
   (if (and *colors-enabled* (terminal-capable-p))
       (format nil "~A~A~A" color text *color-reset*)
       text))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Spinner
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *spinner-frames* '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  "Braille spinner frames.")
+
+(defvar *spinner-index* 0
+  "Current spinner frame index.")
+
+(defun spinner-frame ()
+  "Return the next spinner frame and advance the index."
+  (let ((frame (nth *spinner-index* *spinner-frames*)))
+    (setf *spinner-index* (mod (1+ *spinner-index*) (length *spinner-frames*)))
+    frame))
+
+(defun show-spinner (&optional message)
+  "Display spinner with optional MESSAGE. Call repeatedly to animate."
+  (format t "~C[2K~C[G~A ~A"
+          #\Escape #\Escape
+          (colorize (spinner-frame) *color-prompt*)
+          (or message ""))
+  (force-output))
+
+(defun clear-spinner ()
+  "Clear the spinner line."
+  (format t "~C[2K~C[G" #\Escape #\Escape)
+  (force-output))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; String Utilities
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun visible-string-length (string)
+  "Return the visible length of STRING, ignoring ANSI escape sequences."
+  (let ((len 0)
+        (i 0)
+        (slen (length string)))
+    (loop while (< i slen) do
+      (let ((char (char string i)))
+        (cond
+          ;; Start of escape sequence
+          ((char= char #\Escape)
+           ;; Skip ESC[...m sequences
+           (incf i)
+           (when (and (< i slen) (char= (char string i) #\[))
+             (incf i)
+             ;; Skip until 'm' or end of string
+             (loop while (and (< i slen)
+                              (not (char= (char string i) #\m)))
+                   do (incf i))
+             (when (< i slen) (incf i))))  ; Skip the 'm'
+          (t
+           (incf len)
+           (incf i)))))
+    len))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Colorized Value Formatting
@@ -142,19 +205,14 @@
 
 (defun print-banner ()
   "Print ICL startup banner."
-  (format t "~&icl ~A" +version+)
-  (if *use-slynk*
-      ;; Get version from inferior Lisp
-      (handler-case
-          (let ((impl-type (first (backend-eval "(lisp-implementation-type)")))
-                (impl-version (first (backend-eval "(lisp-implementation-version)"))))
-            (format t " (~A ~A)~%" impl-type impl-version))
-        (error ()
-          (format t "~%")))
-      ;; Local mode
-      (format t " (~A ~A)~%"
-              (lisp-implementation-type)
-              (lisp-implementation-version)))
+  (format t "icl ~A" +version+)
+  ;; Get version from inferior Lisp
+  (handler-case
+      (let ((impl-type (first (backend-eval "(lisp-implementation-type)")))
+            (impl-version (first (backend-eval "(lisp-implementation-version)"))))
+        (format t " (~A ~A)~%" impl-type impl-version))
+    (error ()
+      (format t "~%")))
   (format t "Type ,help for commands, ,quit to exit.~2%"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────

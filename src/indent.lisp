@@ -214,8 +214,9 @@
                         (declare (ignore sym-end))
                         (when sym
                           (setf (paren-info-symbol (first stack)) sym)
+                          ;; first-arg-col is offset from position right after paren
                           (setf (paren-info-first-arg-col (first stack))
-                                (+ col (- ws-end i))))))))
+                                (- ws-end i)))))))
                  ;; Close paren/bracket
                  ((member c '(#\) #\] #\}))
                   (pop stack)

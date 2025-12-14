@@ -122,10 +122,4 @@
 (defvar *in-repl* nil
   "T when ICL REPL is active.")
 
-;;; ─────────────────────────────────────────────────────────────────────────────
-;;; Backend Configuration
-;;; ─────────────────────────────────────────────────────────────────────────────
-
-(defvar *use-slynk* nil
-  "T when using Slynk backend for evaluation.")
 

@@ -245,7 +245,7 @@
     (unless c
       (return-from parse-csi-sequence :unknown))
     (cond
-      ;; Arrow keys
+      ;; Arrow keys (possibly with modifiers: ESC[1;2A = Shift+Up)
       ((char= c #\A) :up)
       ((char= c #\B) :down)
       ((char= c #\C) :right)
@@ -253,24 +253,144 @@
       ;; Home/End
       ((char= c #\H) :home)
       ((char= c #\F) :end)
-      ;; Extended sequences (e.g., ESC[1~ for Home)
+      ;; Extended sequences (e.g., ESC[1~ for Home, ESC[13;2u for Shift+Enter)
       ((digit-char-p c)
        (parse-extended-csi c))
       (t :unknown))))
 
 (defun parse-extended-csi (first-digit)
-  "Parse extended CSI sequence starting with a digit."
-  (let ((num (- (char-code first-digit) (char-code #\0))))
-    ;; Read remaining digits and tilde
-    (loop for c = (read-char-raw)
+  "Parse extended CSI sequence starting with a digit.
+   Handles formats like:
+   - ESC[N~ (function keys)
+   - ESC[N;Mu (kitty keyboard protocol, M=modifier)
+   - ESC[1;MA (modified arrow keys)"
+  (let ((num1 (- (char-code first-digit) (char-code #\0)))
+        (num2 nil)
+        (c nil))
+    ;; Read first number
+    (loop do (setf c (read-char-raw))
           while (and c (digit-char-p c))
-          do (setf num (+ (* num 10) (- (char-code c) (char-code #\0))))
-          finally
-             (case num
-               (1 (return :home))
-               (2 (return :insert))
-               (3 (return :delete))
-               (4 (return :end))
-               (5 (return :page-up))
-               (6 (return :page-down))
-               (otherwise (return :unknown))))))
+          do (setf num1 (+ (* num1 10) (- (char-code c) (char-code #\0)))))
+    ;; Check what follows
+    (unless c
+      (return-from parse-extended-csi :unknown))
+    ;; If semicolon, read modifier
+    (when (char= c #\;)
+      (setf num2 0)
+      (loop do (setf c (read-char-raw))
+            while (and c (digit-char-p c))
+            do (setf num2 (+ (* num2 10) (- (char-code c) (char-code #\0))))))
+    ;; Now c is the terminator
+    (unless c
+      (return-from parse-extended-csi :unknown))
+    ;; Handle based on terminator
+    (cond
+      ;; Kitty keyboard protocol: ESC[key;modifieru
+      ;; key=13 is CR (Enter), modifier=2 is Shift
+      ((char= c #\u)
+       (if (and (= num1 13) num2 (= (logand num2 1) 1))  ; Shift bit set
+           :shift-enter
+           :unknown))
+      ;; Modified arrow keys: ESC[1;2A = Shift+Up, etc.
+      ((and (= num1 1) num2)
+       (cond
+         ((char= c #\A) :up)
+         ((char= c #\B) :down)
+         ((char= c #\C) :right)
+         ((char= c #\D) :left)
+         (t :unknown)))
+      ;; Standard function key sequences: ESC[N~
+      ((char= c #\~)
+       (case num1
+         (1 :home)
+         (2 :insert)
+         (3 :delete)
+         (4 :end)
+         (5 :page-up)
+         (6 :page-down)
+         (otherwise :unknown)))
+      (t :unknown))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Terminal Color Detection
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *terminal-background* nil
+  "Cached terminal background: :dark, :light, or nil if unknown.")
+
+(defun query-terminal-background ()
+  "Query terminal for its background color using OSC 11.
+   Returns (values r g b) as integers 0-65535, or NIL if query fails."
+  (handler-case
+      (with-raw-mode
+        ;; Send OSC 11 query: ESC ] 11 ; ? BEL
+        (format t "~C]11;?~C" +esc+ (code-char 7))
+        (force-output)
+        ;; Give terminal time to respond
+        (sleep 0.05)
+        ;; Check if response available
+        (unless (char-available-p)
+          (return-from query-terminal-background nil))
+        ;; Read response: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \ or BEL
+        (let ((c (read-char-raw)))
+          (unless (and c (char= c +esc+))
+            (return-from query-terminal-background nil))
+          (setf c (read-char-raw))
+          (unless (and c (char= c #\]))
+            (return-from query-terminal-background nil))
+          ;; Skip "11;"
+          (dotimes (i 3) (read-char-raw))
+          ;; Read until we find "rgb:" or similar
+          (let ((buf (make-array 64 :element-type 'character :fill-pointer 0)))
+            (loop for ch = (read-char-raw)
+                  while (and ch
+                             (not (char= ch +esc+))
+                             (not (char= ch (code-char 7)))
+                             (< (length buf) 64))
+                  do (vector-push ch buf))
+            ;; Parse rgb:RRRR/GGGG/BBBB format
+            (let ((str (coerce buf 'string)))
+              (when (and (>= (length str) 4)
+                         (string-equal (subseq str 0 4) "rgb:"))
+                (let* ((rgb-part (subseq str 4))
+                       (parts (split-sequence:split-sequence #\/ rgb-part)))
+                  (when (= (length parts) 3)
+                    (handler-case
+                        (values (parse-integer (first parts) :radix 16)
+                                (parse-integer (second parts) :radix 16)
+                                (parse-integer (third parts) :radix 16))
+                      (error () nil)))))))))
+    (error () nil)))
+
+(defun compute-luminance (r g b)
+  "Compute relative luminance from RGB values (0-65535 range).
+   Returns a value 0.0 (black) to 1.0 (white)."
+  (let ((r-norm (/ r 65535.0))
+        (g-norm (/ g 65535.0))
+        (b-norm (/ b 65535.0)))
+    ;; Standard luminance formula
+    (+ (* 0.2126 r-norm)
+       (* 0.7152 g-norm)
+       (* 0.0722 b-norm))))
+
+(defun detect-terminal-background ()
+  "Detect if terminal has light or dark background.
+   Returns :dark, :light, or nil if unable to determine.
+   Caches result in *terminal-background*."
+  (unless *terminal-background*
+    (multiple-value-bind (r g b) (query-terminal-background)
+      (when (and r g b)
+        (let ((luminance (compute-luminance r g b)))
+          (setf *terminal-background*
+                (if (< luminance 0.5) :dark :light))))))
+  *terminal-background*)
+
+(defun terminal-dark-p ()
+  "Return T if terminal has dark background, NIL otherwise.
+   Defaults to assuming dark background if detection fails."
+  (let ((bg (detect-terminal-background)))
+    (or (null bg) (eq bg :dark))))
+
+(defun terminal-light-p ()
+  "Return T if terminal has light background."
+  (eq (detect-terminal-background) :light))

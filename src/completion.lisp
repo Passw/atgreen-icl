@@ -330,26 +330,13 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun compute-completions (prefix type)
-  "Compute completion candidates for PREFIX of TYPE.
-   Uses Slynk backend when *use-slynk* is T."
+  "Compute completion candidates for PREFIX of TYPE using Slynk backend."
   (case type
-    (:symbol
-     (if *use-slynk*
-         (complete-symbol-via-slynk prefix)
-         (complete-symbol prefix)))
-    (:keyword
-     (if *use-slynk*
-         (complete-keyword-via-slynk prefix)
-         (complete-keyword prefix)))
-    (:qualified
-     (if *use-slynk*
-         (complete-qualified-via-slynk prefix)
-         (complete-qualified prefix)))
+    (:symbol (complete-symbol-via-slynk prefix))
+    (:keyword (complete-keyword-via-slynk prefix))
+    (:qualified (complete-qualified-via-slynk prefix))
     (:path (complete-path prefix))  ; Paths are always local
-    (otherwise
-     (if *use-slynk*
-         (complete-symbol-via-slynk prefix)
-         (complete-symbol prefix)))))
+    (otherwise (complete-symbol-via-slynk prefix))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Slynk-backed Completion

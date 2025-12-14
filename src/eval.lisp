@@ -79,39 +79,32 @@
 
 (defun eval-and-print (input)
   "Parse, evaluate, and print results from INPUT string.
-   Handles all errors gracefully. Uses backend abstraction for evaluation."
+   Handles all errors gracefully. Uses Slynk backend for evaluation."
   (handler-case
-      (if *use-slynk*
-          ;; Slynk backend evaluation
-          (multiple-value-bind (result output)
-              (backend-eval input)
-            ;; Output any printed output from the inferior Lisp
-            (when (and output (plusp (length output)))
-              (write-string output)
-              (unless (char= (char output (1- (length output))) #\Newline)
-                (terpri)))
-            ;; Handle the result
-            (cond
-              ((null result)
-               ;; No result - might be output already printed
-               nil)
-              ((stringp result)
-               ;; listener-eval returns string representation
-               (unless (string= result "")
-                 (format t "~&~A~A~%"
-                         (colorize *result-prefix* *color-prefix*)
-                         result)))
-              ((listp result)
-               ;; Structured result
-               (print-values result))
-              (t
-               ;; Unexpected result type - print as-is
-               (format t "~&~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
-          ;; Local evaluation (original behavior)
-          (multiple-value-bind (values form)
-              (eval-input input)
-            (declare (ignore form))
-            (print-values values)))
+      (multiple-value-bind (result output)
+          (backend-eval input)
+        ;; Output any printed output from the inferior Lisp
+        (when (and output (plusp (length output)))
+          (write-string output)
+          (unless (char= (char output (1- (length output))) #\Newline)
+            (terpri)))
+        ;; Handle the result
+        (cond
+          ((null result)
+           ;; No result - might be output already printed
+           nil)
+          ((stringp result)
+           ;; listener-eval returns string representation
+           (unless (string= result "")
+             (format t "~&~A~A~%"
+                     (colorize *result-prefix* *color-prefix*)
+                     result)))
+          ((listp result)
+           ;; Structured result
+           (print-values result))
+          (t
+           ;; Unexpected result type - print as-is
+           (format t "~&~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
     (reader-error (e)
       (format *error-output* "~&Read error: ~A~%" e))
     (package-error (e)

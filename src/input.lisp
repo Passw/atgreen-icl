@@ -30,11 +30,10 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun make-prompt ()
-  "Generate the primary prompt string."
+  "Generate the primary prompt string with dimmed package name."
   (if *prompt-hook*
       (funcall *prompt-hook* *icl-package*)
-      (format nil *prompt-string*
-              (package-name *icl-package*))))
+      (format nil "~A> " (colorize (package-name *icl-package*) *color-prompt*))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Input Reading
@@ -77,13 +76,14 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun make-continuation-prompt ()
-  "Generate continuation prompt aligned with primary prompt."
+  "Generate continuation prompt aligned with primary prompt (dimmed)."
   (let* ((primary (make-prompt))
-         (width (length primary)))
-    ;; Create aligned continuation: dots followed by space
-    (concatenate 'string
-                 (make-string (max 0 (- width 2)) :initial-element #\.)
-                 ". ")))
+         (width (visible-string-length primary)))
+    ;; Create aligned continuation: dots followed by space (dimmed)
+    (colorize (concatenate 'string
+                           (make-string (max 0 (- width 2)) :initial-element #\.)
+                           ". ")
+              *color-prompt*)))
 
 (defun read-complete-input ()
   "Read a complete Lisp form with appropriate backend.

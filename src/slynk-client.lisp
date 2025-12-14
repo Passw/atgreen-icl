@@ -35,7 +35,6 @@
         (when conn
           (setf *slynk-connection* conn)
           (setf *slynk-connected-p* t)
-          (format t "~&; Connected to Slynk at ~A:~D~%" host port)
           t))
     (error (e)
       (setf *slynk-connected-p* nil)

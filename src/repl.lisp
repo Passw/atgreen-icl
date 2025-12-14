@@ -35,7 +35,7 @@
     ;; Cleanup on exit
     (save-history)
     ;; Stop inferior Lisp if running
-    (when (and *use-slynk* (inferior-lisp-alive-p))
+    (when (inferior-lisp-alive-p)
       (stop-inferior-lisp))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -87,6 +87,8 @@
   "Start ICL REPL with optional configuration loading.
    LOAD-CONFIG: if T, load ~/.iclrc
    BANNER: if T, print startup banner"
+  ;; Detect terminal background and set up colors
+  (setup-highlight-colors)
   ;; Load persistent history
   (load-history)
   ;; Load user config

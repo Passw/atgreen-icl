@@ -67,6 +67,20 @@
   (and (= 1 (buffer-line-count buf))
        (zerop (length (buffer-line buf 0)))))
 
+(defun buffer-cursor-position (buf)
+  "Return the absolute cursor position in the buffer content string.
+   This counts characters from the start, including newlines."
+  (let ((pos 0)
+        (target-row (edit-buffer-row buf))
+        (target-col (edit-buffer-col buf)))
+    ;; Add lengths of all lines before cursor row (plus newlines)
+    (dotimes (i target-row)
+      (incf pos (length (buffer-line buf i)))
+      (incf pos))  ; +1 for newline
+    ;; Add column position in current row
+    (incf pos target-col)
+    pos))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Cursor Movement
 ;;; ─────────────────────────────────────────────────────────────────────────────

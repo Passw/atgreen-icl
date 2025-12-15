@@ -216,8 +216,12 @@
   "Change the current package in Slynk."
   (unless *slynk-connected-p*
     (error "Not connected to backend server"))
+  ;; Wrap in error handler to avoid debugger for non-existent packages
   (slynk-client:slime-eval
-   `(cl:funcall (cl:read-from-string "slynk:set-package") ,package-name)
+   `(cl:handler-case
+        (cl:funcall (cl:read-from-string "slynk:set-package") ,package-name)
+      (cl:error (e)
+        (cl:error "~A" e)))
    *slynk-connection*))
 
 (defun slynk-list-threads ()

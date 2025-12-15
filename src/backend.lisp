@@ -57,7 +57,7 @@
           (setf (rest entry) plist))
         ;; Add new entry
         (push (list* impl
-                     :program (or program (string-downcase impl))
+                     :program (or program (string-downcase (symbol-name impl)))
                      :args args
                      :eval-arg (or eval-arg "--eval"))
               *lisp-implementations*))
@@ -204,13 +204,22 @@
       (getf (rest entry) :program))))
 
 (defun program-exists-p (program)
-  "Return T if PROGRAM can be found in PATH."
-  (or (probe-file program)
-      (ignore-errors
-        (let ((result (uiop:run-program (list "which" program)
-                                        :output :string
-                                        :ignore-error-status t)))
-          (and result (not (string= result "")))))))
+  "Return T if PROGRAM can be found in PATH.
+   Uses portable PATH search instead of shell commands."
+  ;; First check if it's an absolute/relative path that exists
+  (when (probe-file program)
+    (return-from program-exists-p t))
+  ;; Search PATH directories
+  (let ((path-dirs (uiop:getenv-absolute-directories "PATH"))
+        ;; On Windows, check common executable extensions
+        #+windows (extensions '("" ".exe" ".cmd" ".bat" ".com"))
+        #-windows (extensions '("")))
+    (dolist (dir path-dirs)
+      (dolist (ext extensions)
+        (let ((full-path (merge-pathnames (concatenate 'string program ext) dir)))
+          (when (probe-file full-path)
+            (return-from program-exists-p t)))))
+    nil))
 
 (defun get-lisp-args (impl)
   "Get command-line arguments for Lisp implementation IMPL."

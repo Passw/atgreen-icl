@@ -16,8 +16,9 @@
        (not (string= (uiop:getenv "TERM") "dumb"))))
 
 (defun select-input-backend ()
-  "Select appropriate input backend based on terminal capabilities."
-  (if (terminal-capable-p)
+  "Select appropriate input backend based on terminal capabilities.
+   Respects *use-multiline-editor* setting."
+  (if (and *use-multiline-editor* (terminal-capable-p))
       :multiline
       :simple))
 

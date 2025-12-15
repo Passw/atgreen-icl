@@ -75,6 +75,10 @@
 ;;; Configuration
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
+(defvar *use-multiline-editor* t
+  "If T (default), use the multiline editor when terminal supports it.
+   If NIL, always use simple line-based input.")
+
 (defvar *history-file* nil
   "Path to persistent command history file. Computed at runtime.")
 

@@ -282,6 +282,19 @@ Use `configure-lisp` to customize how ICL invokes a Lisp implementation:
 | `ICL_BACKGROUND` | Override terminal background detection (`dark` or `light`) |
 | `NO_COLOR` | When set to any non-empty value, disables colored output (see [no-color.org](https://no-color.org/)) |
 
+## Supported Lisp Implementations
+
+ICL aims to support multiple Common Lisp implementations. SBCL is the primary development and testing platform.
+
+| Implementation | Status | Notes |
+|---------------|--------|-------|
+| SBCL | Tested | Full support including profiling |
+| CCL | Untested | |
+| ECL | Untested | Requires GCC for compilation |
+| ABCL | Untested | Runs on JVM |
+| Clasp | Untested | |
+| CLISP | Experimental | Known connection issues |
+
 ## Architecture
 
 ICL operates as a frontend that communicates with a backend Lisp process via the Slynk protocol (from SLY). This architecture allows ICL to:

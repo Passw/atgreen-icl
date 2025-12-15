@@ -499,9 +499,12 @@
     ((eql key :interrupt)
      :cancel)
     ;; Enter - check if form is complete
+    ;; In paredit mode, also require cursor at end (since forms are always balanced)
     ((eql key :enter)
      (let ((contents (buffer-contents buf)))
-       (if (form-complete-p contents)
+       (if (and (form-complete-p contents)
+                (or (not *paredit-mode*)
+                    (buffer-at-end-p buf)))
            :done
            (progn
              (buffer-insert-newline buf)
@@ -542,13 +545,17 @@
     ((eql key :end)
      (buffer-move-to-line-end buf)
      (if (> (buffer-line-count buf) 1) :redraw :continue))
-    ;; Deletion
+    ;; Deletion (with paredit support)
     ((eql key :backspace)
-     (if (buffer-delete-char-before buf)
+     (if (if *paredit-mode*
+             (paredit-backspace buf)
+             (buffer-delete-char-before buf))
          :redraw
          :continue))
     ((eql key :delete)
-     (if (buffer-delete-char-at buf)
+     (if (if *paredit-mode*
+             (paredit-delete buf)
+             (buffer-delete-char-at buf))
          :redraw
          :continue))
     ((eql key :kill-line)
@@ -568,17 +575,30 @@
     ((and (consp key) (eql (first key) :alt) (char-equal (rest key) #\q))
      (buffer-reindent buf)
      :redraw)
+    ;; Alt+F - forward sexp (paredit)
+    ((and (consp key) (eql (first key) :alt) (char-equal (rest key) #\f))
+     (when (buffer-forward-sexp buf)
+       :redraw))
+    ;; Alt+B - backward sexp (paredit)
+    ((and (consp key) (eql (first key) :alt) (char-equal (rest key) #\b))
+     (when (buffer-backward-sexp buf)
+       :redraw))
     ;; Ctrl-R - enter reverse search mode
     ((eql key :reverse-search)
      (enter-search-mode buf)
      :search-mode)
-    ;; Regular character
+    ;; Regular character (with paredit support)
     ((characterp key)
-     (buffer-insert-char buf key)
-     ;; Need full redraw for multi-line to update paren highlighting on all lines
-     (if (> (buffer-line-count buf) 1)
-         :redraw
-         :continue))
+     (if (and *paredit-mode*
+              (eql (paredit-handle-char buf key) :handled))
+         ;; Paredit handled it
+         (if (> (buffer-line-count buf) 1) :redraw :continue)
+         ;; Normal character insertion
+         (progn
+           (buffer-insert-char buf key)
+           (if (> (buffer-line-count buf) 1)
+               :redraw
+               :continue))))
     ;; Unknown - ignore
     (t :continue)))
 

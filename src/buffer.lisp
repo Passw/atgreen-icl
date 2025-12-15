@@ -152,6 +152,11 @@
   (setf (edit-buffer-row buf) (1- (buffer-line-count buf)))
   (buffer-move-to-line-end buf))
 
+(defun buffer-at-end-p (buf)
+  "Return T if cursor is at the end of the buffer."
+  (and (= (edit-buffer-row buf) (1- (buffer-line-count buf)))
+       (= (edit-buffer-col buf) (length (buffer-current-line buf)))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Text Insertion
 ;;; ─────────────────────────────────────────────────────────────────────────────

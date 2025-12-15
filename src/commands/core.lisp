@@ -251,14 +251,14 @@ Example: ,apropos string"
         (if matches
             (progn
               (format t "~&~D symbols matching \"~A\":~%" (length matches) pattern)
-              ;; Slynk returns structured data
               (let ((display (if (> (length matches) 50)
                                  (subseq matches 0 50)
                                  matches)))
                 (dolist (item display)
-                  ;; Item format: (:designator "pkg:name" :function/:variable/etc)
-                  (if (listp item)
-                      (format t "  ~A~%" (getf item :designator))
+                  ;; Item format: (symbol-name package-name kind)
+                  (if (and (listp item) (>= (length item) 3))
+                      (format t "  ~A:~A (~A)~%"
+                              (second item) (first item) (third item))
                       (format t "  ~A~%" item)))
                 (when (> (length matches) 50)
                   (format t "  ... and ~D more~%" (- (length matches) 50)))))
@@ -1027,15 +1027,45 @@ Example: ,show-config"
   (format t "  History file: ~A~%" (history-file))
   (format t "  History size: ~D~%" *history-size*)
   (format t "~%Available customization variables:~%")
+  (format t "  *default-lisp*     - Lisp implementation (default: :SBCL)~%")
   (format t "  *prompt-string*    - Prompt format (default: \"~~A> \")~%")
   (format t "  *result-prefix*    - Result prefix (default: \"=> \")~%")
   (format t "  *colors-enabled*   - Enable colors (default: T)~%")
   (format t "  *history-size*     - Max history entries (default: 1000)~%")
+  (format t "  *paredit-mode*     - Structural editing (default: NIL)~%")
   (format t "~%Available hooks:~%")
   (format t "  *before-eval-hook* - Called before evaluation~%")
   (format t "  *after-eval-hook*  - Called after evaluation~%")
   (format t "  *prompt-hook*      - Custom prompt function~%")
   (format t "  *error-hook*       - Custom error handler~%")
+  (format t "~%Functions:~%")
+  (format t "  (configure-lisp impl &key program args eval-arg)~%")
   (format t "~%Example ~~/.iclrc:~%")
+  (format t "  (setf icl:*default-lisp* :ccl)~%")
   (format t "  (setf icl:*prompt-string* ~S)~%" "λ ~A> ")
-  (format t "  (setf icl:*colors-enabled* t)~%"))
+  (format t "  (setf icl:*colors-enabled* t)~%")
+  (format t "  (setf icl:*paredit-mode* t)~%")
+  (format t "~%  ;; Custom SBCL with extra memory~%")
+  (format t "  (icl:configure-lisp :sbcl~%")
+  (format t "    :program \"/opt/sbcl/bin/sbcl\"~%")
+  (format t "    :args '(\"--dynamic-space-size\" \"8192\"))~%"))
+
+(define-command paredit (&optional state)
+  "Toggle or set paredit mode for structural editing.
+When enabled: auto-closes parens/quotes, safe deletion, sexp navigation.
+Keys: Alt-F (forward-sexp), Alt-B (backward-sexp)
+Example: ,paredit        ; toggle
+         ,paredit on     ; enable
+         ,paredit off    ; disable"
+  (cond
+    ((null state)
+     (setf *paredit-mode* (not *paredit-mode*))
+     (format t "~&Paredit mode: ~A~%" (if *paredit-mode* "enabled" "disabled")))
+    ((member state '("on" "t" "true" "1") :test #'string-equal)
+     (setf *paredit-mode* t)
+     (format t "~&Paredit mode: enabled~%"))
+    ((member state '("off" "nil" "false" "0") :test #'string-equal)
+     (setf *paredit-mode* nil)
+     (format t "~&Paredit mode: disabled~%"))
+    (t
+     (format *error-output* "~&Invalid argument: ~A (use on/off)~%" state))))

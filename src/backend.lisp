@@ -36,6 +36,33 @@
 (defvar *current-lisp* nil
   "Currently running Lisp implementation.")
 
+(defun configure-lisp (impl &key program args eval-arg)
+  "Configure how to invoke a Lisp implementation.
+   IMPL - keyword like :sbcl, :ccl, etc.
+   PROGRAM - path to executable (e.g., \"/opt/sbcl/bin/sbcl\")
+   ARGS - list of extra command-line arguments
+   EVAL-ARG - the eval flag (e.g., \"--eval\")
+
+   Example in ~/.iclrc:
+     (icl:configure-lisp :sbcl
+       :program \"/opt/sbcl-dev/bin/sbcl\"
+       :args '(\"--dynamic-space-size\" \"8192\"))"
+  (let ((entry (assoc impl *lisp-implementations*)))
+    (if entry
+        ;; Update existing entry
+        (let ((plist (rest entry)))
+          (when program (setf (getf plist :program) program))
+          (when args (setf (getf plist :args) args))
+          (when eval-arg (setf (getf plist :eval-arg) eval-arg))
+          (setf (rest entry) plist))
+        ;; Add new entry
+        (push (list* impl
+                     :program (or program (string-downcase impl))
+                     :args args
+                     :eval-arg (or eval-arg "--eval"))
+              *lisp-implementations*))
+    impl))
+
 (defun lisp-available-p (impl)
   "Check if Lisp implementation IMPL is available in PATH."
   (let ((program (find-lisp-program impl)))

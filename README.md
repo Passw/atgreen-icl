@@ -10,6 +10,7 @@ ICL is an enhanced REPL for Common Lisp. It provides a modern, terminal-based in
 
 - **Syntax highlighting** - Colorized input with distinct colors for keywords, strings, comments, numbers, and symbols
 - **Parenthesis matching** - Real-time highlighting of matching parentheses as you type
+- **Paredit mode** - Structural editing with auto-close parens, safe deletion, and sexp navigation
 - **Multi-line input** - Automatically detects incomplete expressions with smart indentation
 - **Persistent history** - Command history saved across sessions
 - **Tab completion** - Complete symbols, package-qualified names, and keywords
@@ -160,6 +161,7 @@ Commands are prefixed with a comma. Type `,help` for a full list.
 |---------|-------------|
 | `,show-config` | Show config file location and customization options |
 | `,reload-config` | Reload ~/.iclrc |
+| `,paredit [on/off]` | Toggle paredit structural editing mode |
 
 ### Session
 
@@ -188,10 +190,45 @@ ICL maintains history of recent values and inputs:
 
 ICL loads `~/.iclrc` on startup (unless `--no-config` is specified). This file can contain any Common Lisp code.
 
-Example `~/.iclrc`:
+### Configuration Variables
+
+| Variable | Description |
+|----------|-------------|
+| `*default-lisp*` | Lisp implementation to use (`:sbcl`, `:ccl`, `:ecl`, `:clisp`, `:abcl`, `:clasp`) |
+| `*prompt-string*` | Prompt format string (default: `"~A> "`) |
+| `*result-prefix*` | Prefix for results (default: `"=> "`) |
+| `*colors-enabled*` | Enable syntax coloring (default: `t`) |
+| `*history-size*` | Maximum history entries (default: `1000`) |
+| `*paredit-mode*` | Enable structural editing (default: `nil`) |
+
+### Customizing Lisp Invocation
+
+Use `configure-lisp` to customize how ICL invokes a Lisp implementation:
+
 ```lisp
-;; Change default package
-(in-package :cl-user)
+(icl:configure-lisp impl &key program args eval-arg)
+```
+
+- **`:program`** - Path to the executable
+- **`:args`** - List of command-line arguments
+- **`:eval-arg`** - The eval flag (e.g., `"--eval"`)
+
+### Example `~/.iclrc`
+
+```lisp
+;; Use CCL instead of SBCL
+(setf icl:*default-lisp* :ccl)
+
+;; Custom SBCL with more memory
+(icl:configure-lisp :sbcl
+  :program "/opt/sbcl/bin/sbcl"
+  :args '("--dynamic-space-size" "8192"))
+
+;; Enable paredit mode
+(setf icl:*paredit-mode* t)
+
+;; Custom prompt
+(setf icl:*prompt-string* "λ ~A> ")
 
 ;; Load commonly used systems
 (asdf:load-system :alexandria)
@@ -220,8 +257,12 @@ Example `~/.iclrc`:
 | `Ctrl+G` | Cancel search |
 | `Up/Down` | Navigate history (on first/last line) or move cursor |
 | `Alt+Q` | Reindent current form |
+| `Alt+F` | Forward sexp (paredit mode only) |
+| `Alt+B` | Backward sexp (paredit mode only) |
 
-**Note:** Use Alt+Enter in gnome-terminal and most other terminals. Shift+Enter only works in terminals with kitty keyboard protocol support (kitty, WezTerm, Alacritty, etc.).
+**Notes:**
+- In paredit mode, Enter only submits when the cursor is at the end of the buffer (allowing multi-line editing of balanced forms)
+- Use Alt+Enter in gnome-terminal and most other terminals. Shift+Enter only works in terminals with kitty keyboard protocol support (kitty, WezTerm, Alacritty, etc.).
 
 ## Environment Variables
 

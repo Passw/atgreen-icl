@@ -264,10 +264,11 @@
   (handler-case
       (let ((impl-type (first (backend-eval "(lisp-implementation-type)")))
             (impl-version (first (backend-eval "(lisp-implementation-version)"))))
-        (format t " (~A ~A)~%" impl-type impl-version))
-    (error ()
-      (format t "~%")))
-  (format t "Type ,help for commands, ,quit to exit.~2%"))
+        (format t " (~A ~A)" impl-type impl-version))
+    (error () nil))
+  (when *paredit-mode*
+    (format t " [paredit]"))
+  (format t "~%Type ,help for commands, ,quit to exit.~2%"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Formatted Output

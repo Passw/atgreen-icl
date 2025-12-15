@@ -72,7 +72,8 @@
   "Evaluate STRING and return structured results.
    Returns (values result output-string).
    Errors are caught on the remote side to avoid Slynk debugger issues.
-   Backtraces are captured and stored in *last-error-backtrace*."
+   Backtraces are captured and stored in *last-error-backtrace*.
+   Output to *standard-output* is captured and returned."
   (declare (ignore package))
   (unless *slynk-connected-p*
     (error "Not connected to backend server"))
@@ -80,17 +81,18 @@
   ;; This prevents Slynk from entering debug mode and trying to notify Emacs
   ;; Also capture backtrace when error occurs
   ;; Convert results to strings on remote side to avoid serialization issues with unreadable objects
-  (let ((wrapper-code (format nil "(handler-case (let ((vals (multiple-value-list (eval (read-from-string ~S))))) (list :ok (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals))) (error (err) (list :error (princ-to-string err) (ignore-errors #+sbcl (with-output-to-string (s) (sb-debug:print-backtrace :stream s :count 30)) #-sbcl nil))))" string)))
+  ;; Capture *standard-output* to return printed output
+  (let ((wrapper-code (format nil "(handler-case (let* ((output-stream (make-string-output-stream)) (vals (let ((*standard-output* output-stream) (*error-output* output-stream) (*trace-output* output-stream)) (multiple-value-list (eval (read-from-string ~S)))))) (list :ok (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals) (get-output-stream-string output-stream))) (error (err) (list :error (princ-to-string err) (ignore-errors #+sbcl (with-output-to-string (s) (sb-debug:print-backtrace :stream s :count 30)) #-sbcl nil))))" string)))
     (handler-case
         (let ((result (slynk-client:slime-eval
                        `(cl:eval (cl:read-from-string ,wrapper-code))
                        *slynk-connection*)))
-          ;; result is either (:ok (values...)) or (:error "message" backtrace)
+          ;; result is either (:ok (values...) output) or (:error "message" backtrace)
           (case (first result)
             (:ok
              (setf *last-error-backtrace* nil
                    *last-error-condition* nil)
-             (values (second result) nil))
+             (values (second result) (third result)))
             (:error
              (setf *last-error-condition* (second result)
                    *last-error-backtrace* (third result))
@@ -140,12 +142,26 @@
    `(cl:funcall (cl:read-from-string "slynk:describe-symbol") ,name)
    *slynk-connection*))
 
-(defun slynk-apropos (pattern &key (package nil) (external-only t))
-  "Search for symbols matching PATTERN."
+(defun slynk-apropos (pattern &key (package nil))
+  "Search for symbols matching PATTERN.
+   Returns list of (symbol-name package-name kind) for each match."
+  (declare (ignore package))
   (unless *slynk-connected-p*
     (error "Not connected to backend server"))
+  ;; Use standard CL apropos-list instead of Slynk-specific function
+  ;; Use cl-user::s as the lambda var to avoid package issues
   (slynk-client:slime-eval
-   `(cl:funcall (cl:read-from-string "slynk:apropos-list-for-emacs") ,pattern ,external-only nil ,package)
+   `(cl:mapcar
+     (cl:lambda (cl-user::s)
+       (cl:list (cl:symbol-name cl-user::s)
+                (cl:package-name (cl:symbol-package cl-user::s))
+                (cl:cond
+                  ((cl:macro-function cl-user::s) "macro")
+                  ((cl:fboundp cl-user::s) "function")
+                  ((cl:boundp cl-user::s) "variable")
+                  ((cl:find-class cl-user::s cl:nil) "class")
+                  (cl:t "symbol"))))
+     (cl:apropos-list ,pattern))
    *slynk-connection*))
 
 (defun slynk-macroexpand (form &key (package "CL-USER"))

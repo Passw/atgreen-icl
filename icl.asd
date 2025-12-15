@@ -8,7 +8,7 @@
   :description "Interactive Common Lisp: An enhanced REPL"
   :author      "Anthony Green <green@moxielogic.com>"
   :license     "MIT"
-  :version     "1.3.0"
+  :version     "1.4.0"
   :depends-on (:clingon
                :version-string
                ;; Input/Terminal
@@ -29,6 +29,7 @@
                  (:file "terminal-posix" :if-feature (:not :windows))
                  (:file "terminal-windows" :if-feature :windows)
                  (:file "buffer")
+                 (:file "paredit")
                  (:file "indent")
                  (:file "completion")
                  (:file "editor")

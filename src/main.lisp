@@ -82,6 +82,10 @@
         (no-banner (clingon:getopt cmd :no-banner))
         (lisp-impl (clingon:getopt cmd :lisp))
         (connect-str (clingon:getopt cmd :connect)))
+    ;; Load config FIRST so *default-lisp* can be set
+    ;; (command line --lisp will override it below)
+    (unless no-config
+      (load-user-config))
     ;; Configure backend mode
     (cond
       ;; Connect to existing Slynk server
@@ -93,7 +97,7 @@
          (unless (slynk-connect :host host :port port)
            (format *error-output* "~&Failed to connect to ~A:~D~%" host port)
            (uiop:quit 1))))
-      ;; Start inferior Lisp with specified implementation
+      ;; Start inferior Lisp with specified implementation (overrides config)
       (lisp-impl
        (let ((impl (intern (string-upcase lisp-impl) :keyword)))
          (setf *default-lisp* impl)
@@ -102,9 +106,11 @@
            (error (e)
              (format *error-output* "~&Failed to start ~A: ~A~%" lisp-impl e)
              (uiop:quit 1)))))
-      ;; Default: auto-detect available Lisp implementation
+      ;; Use *default-lisp* from config, or auto-detect
       (t
-       (let ((impl (find-available-lisp)))
+       (let ((impl (if (lisp-available-p *default-lisp*)
+                       *default-lisp*
+                       (find-available-lisp))))
          (cond
            (impl
             (setf *default-lisp* impl)
@@ -127,15 +133,22 @@
     ;; Evaluate expression if specified
     (when eval-expr
       (handler-case
-          (let ((values (backend-eval eval-expr)))
+          (multiple-value-bind (values output)
+              (backend-eval eval-expr)
+            ;; Print any output from the evaluation
+            (when (and output (plusp (length output)))
+              (write-string output)
+              (unless (char= (char output (1- (length output))) #\Newline)
+                (terpri)))
+            ;; Print return values
             (dolist (v values)
               (format t "~S~%" v))
             (uiop:quit 0))
         (error (e)
           (format *error-output* "~&Error: ~A~%" e)
           (uiop:quit 1))))
-    ;; Otherwise start REPL
-    (start-repl :load-config (not no-config)
+    ;; Otherwise start REPL (config already loaded)
+    (start-repl :load-config nil
                 :banner (not no-banner))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────

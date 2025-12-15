@@ -24,6 +24,7 @@
    #:*use-multiline-editor*
    #:*colors-enabled*
    #:*syntax-highlighting-enabled*
+   #:*paredit-mode*
 
    ;; Hooks
    #:*before-eval-hook*
@@ -57,6 +58,7 @@
    #:*slynk-host*
    #:*default-lisp*
    #:*slynk-connected-p*
+   #:configure-lisp
    #:slynk-connect
    #:slynk-disconnect
    #:start-inferior-lisp

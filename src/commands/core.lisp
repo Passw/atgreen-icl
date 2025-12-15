@@ -416,10 +416,21 @@ Example: ,arglist format"
 ;;; Inspection
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(define-command (inspect i) (expr-string)
-  "Inspect the result of evaluating an expression.
+(define-command (inspect i) (&optional expr-string)
+  "Interactively inspect the result of evaluating an expression.
+Use arrow keys or j/k to navigate, Enter to drill in, b to go back, q to quit.
+Without argument, inspects the last result (*).
+Example: ,i
 Example: ,inspect *package*
 Example: ,inspect (make-hash-table)"
+  (handler-case
+      (run-inspector (or expr-string "*"))
+    (error (e)
+      (format *error-output* "~&Error inspecting: ~A~%" e))))
+
+(define-command inspect-static (expr-string)
+  "Inspect an expression (non-interactive output).
+Example: ,inspect-static *package*"
   (handler-case
       (let ((inspection (slynk-inspect expr-string)))
         (if inspection

@@ -32,6 +32,7 @@
                  (:file "paredit")
                  (:file "indent")
                  (:file "completion")
+                 (:file "inspector")
                  (:file "editor")
                  (:file "input")
                  (:file "slynk-client")

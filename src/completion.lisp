@@ -113,7 +113,7 @@
   "Return T if CHAR can be part of a completion word."
   (or (alphanumericp char)
       (member char '(#\- #\_ #\* #\+ #\/ #\= #\< #\> #\! #\? #\% #\& #\$
-                     #\: #\. #\~ #\^))))
+                     #\: #\. #\~ #\^ #\,))))
 
 (defun extract-completion-prefix (line col)
   "Extract the word to complete from LINE ending at COL.
@@ -133,6 +133,8 @@
   (cond
     ;; Empty
     ((zerop (length prefix)) :symbol)
+    ;; Command (starts with comma)
+    ((char= (char prefix 0) #\,) :command)
     ;; Keyword
     ((char= (char prefix 0) #\:) :keyword)
     ;; Path (starts with / or ./ or ~/ or contains /)
@@ -332,11 +334,33 @@
 (defun compute-completions (prefix type)
   "Compute completion candidates for PREFIX of TYPE using Slynk backend."
   (case type
+    (:command (complete-command prefix))
     (:symbol (complete-symbol-via-slynk prefix))
     (:keyword (complete-keyword-via-slynk prefix))
     (:qualified (complete-qualified-via-slynk prefix))
     (:path (complete-path prefix))  ; Paths are always local
     (otherwise (complete-symbol-via-slynk prefix))))
+
+(defun complete-command (prefix)
+  "Complete command PREFIX (starts with comma).
+   Returns list of matching command names with comma prefix."
+  (let* ((cmd-prefix (if (and (plusp (length prefix))
+                              (char= (char prefix 0) #\,))
+                         (subseq prefix 1)
+                         prefix))
+         (up-prefix (string-upcase cmd-prefix))
+         (results nil))
+    ;; Get all commands and filter by prefix
+    (dolist (cmd (list-commands))
+      (let ((name (string-downcase (symbol-name (command-name cmd)))))
+        (when (prefix-match-p up-prefix (string-upcase name))
+          (push (concatenate 'string "," name) results)))
+      ;; Also check aliases
+      (dolist (alias (command-aliases cmd))
+        (let ((alias-name (string-downcase (symbol-name alias))))
+          (when (prefix-match-p up-prefix (string-upcase alias-name))
+            (push (concatenate 'string "," alias-name) results)))))
+    (sort (remove-duplicates results :test #'string=) #'string<)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Slynk-backed Completion

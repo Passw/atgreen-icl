@@ -971,7 +971,8 @@ Example: ,ql cl-ppcre"
       (format *error-output* "~&Error loading system: ~A~%" e))))
 
 (defun slynk-load-system (system-name)
-  "Load SYSTEM-NAME via Slynk using trivial-system-loader approach."
+  "Load SYSTEM-NAME via Slynk using trivial-system-loader approach.
+   Uses streaming eval so output appears incrementally."
   (unless *slynk-connected-p*
     (error "Not connected to Slynk server"))
   (let* ((name (string-trim '(#\Space #\Tab #\") system-name))
@@ -998,9 +999,7 @@ Example: ,ql cl-ppcre"
              (t
               (error \"No system loader available (OCICL, Quicklisp, or ASDF)\"))))))
   (try-load))" name)))
-    (slynk-client:slime-eval
-     `(cl:eval (cl:read-from-string ,loader-code))
-     *slynk-connection*)))
+    (first (backend-eval loader-code))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Configuration Commands

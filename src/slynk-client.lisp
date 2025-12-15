@@ -69,37 +69,46 @@
   "Condition string from the last error.")
 
 (defun slynk-eval-form (string &key (package "CL-USER"))
-  "Evaluate STRING and return structured results.
-   Returns (values result output-string).
+  "Evaluate STRING and return result values.
+   Output streams to the terminal via Slynk :write-string events.
    Errors are caught on the remote side to avoid Slynk debugger issues.
-   Backtraces are captured and stored in *last-error-backtrace*.
-   Output to *standard-output* is captured and returned."
+   Backtraces are captured and stored in *last-error-backtrace*."
   (declare (ignore package))
   (unless *slynk-connected-p*
     (error "Not connected to backend server"))
-  ;; Wrap evaluation in error handling on the remote side
-  ;; This prevents Slynk from entering debug mode and trying to notify Emacs
-  ;; Also capture backtrace when error occurs
-  ;; Convert results to strings on remote side to avoid serialization issues with unreadable objects
-  ;; Capture *standard-output* to return printed output
-  (let ((wrapper-code (format nil "(handler-case (let* ((output-stream (make-string-output-stream)) (vals (let ((*standard-output* output-stream) (*error-output* output-stream) (*trace-output* output-stream)) (multiple-value-list (eval (read-from-string ~S)))))) (list :ok (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals) (get-output-stream-string output-stream))) (error (err) (list :error (princ-to-string err) (ignore-errors #+sbcl (with-output-to-string (s) (sb-debug:print-backtrace :stream s :count 30)) #-sbcl nil))))" string)))
+  ;; Use slynk-backend:make-output-stream with a callback that sends :write-string
+  ;; events via slynk::send-to-emacs for true streaming output
+  (let ((wrapper-code (format nil "(handler-case
+  (let* ((stream-out (slynk-backend:make-output-stream
+                      (lambda (s) (slynk::send-to-emacs (list :write-string s)) (values))))
+         (vals (let ((*standard-output* stream-out)
+                     (*error-output* stream-out)
+                     (*trace-output* stream-out))
+                 (unwind-protect
+                      (multiple-value-list (eval (read-from-string ~S)))
+                   (force-output stream-out)))))
+    (list :ok (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals)))
+  (error (err)
+    (list :error (princ-to-string err)
+          (ignore-errors
+            #+sbcl (with-output-to-string (s)
+                     (sb-debug:print-backtrace :stream s :count 30))
+            #-sbcl nil))))" string)))
     (handler-case
         (let ((result (slynk-client:slime-eval
                        `(cl:eval (cl:read-from-string ,wrapper-code))
                        *slynk-connection*)))
-          ;; result is either (:ok (values...) output) or (:error "message" backtrace)
           (case (first result)
             (:ok
              (setf *last-error-backtrace* nil
                    *last-error-condition* nil)
-             (values (second result) (third result)))
+             (second result))
             (:error
              (setf *last-error-condition* (second result)
                    *last-error-backtrace* (third result))
              (error "~A" (second result)))
-            (otherwise (values result nil))))
+            (otherwise result)))
       (slynk-client:slime-network-error (e)
-        ;; Connection lost - mark as disconnected
         (setf *slynk-connected-p* nil)
         (error "Backend connection lost: ~A" e)))))
 

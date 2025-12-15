@@ -341,7 +341,7 @@
 
 (defun backend-eval (string)
   "Evaluate STRING using the Slynk backend.
-   Returns (values result-values output-string)."
+   Output streams to terminal. Returns result values."
   (ensure-backend)
   (slynk-eval-form string))
 

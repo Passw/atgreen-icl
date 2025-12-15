@@ -133,13 +133,8 @@
     ;; Evaluate expression if specified
     (when eval-expr
       (handler-case
-          (multiple-value-bind (values output)
-              (backend-eval eval-expr)
-            ;; Print any output from the evaluation
-            (when (and output (plusp (length output)))
-              (write-string output)
-              (unless (char= (char output (1- (length output))) #\Newline)
-                (terpri)))
+          (let ((values (backend-eval eval-expr)))
+            ;; Output streams automatically via :write-string events
             ;; Print return values
             (dolist (v values)
               (format t "~S~%" v))

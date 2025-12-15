@@ -63,24 +63,22 @@
 (defun eval-and-print (input)
   "Parse, evaluate, and print results from INPUT string.
    Handles all errors gracefully. Uses Slynk backend for evaluation."
-  (handler-case
-      (let* ((form (read-form input)))
-        (run-before-eval-hooks form)
-        (multiple-value-bind (result output)
-            (backend-eval input)
-          ;; Output any printed output from the inferior Lisp
-          (when (and output (plusp (length output)))
-            (write-string output)
-            (unless (char= (char output (1- (length output))) #\Newline)
-              (terpri)))
+  ;; Try to read form locally for hooks/history, but don't fail if it doesn't work
+  ;; (e.g., if the form uses packages only defined in the backend)
+  (let ((form (ignore-errors (read-form input))))
+    (when form
+      (run-before-eval-hooks form))
+    (handler-case
+        (let ((result (backend-eval input)))
           ;; Update history/hooks with best-effort values
           (let ((values (cond
                           ((listp result) result)
                           ((null result) nil)
                           (t (list result)))))
-            (when values
+            (when (and form values)
               (update-history form values))
-            (run-after-eval-hooks form values))
+            (when form
+              (run-after-eval-hooks form values)))
           ;; Handle the result for display
           (cond
             ((null result)
@@ -97,22 +95,25 @@
              (print-values result))
             (t
              ;; Unexpected result type - print as-is
-             (format t "~&~A~S~%" (colorize *result-prefix* *color-prefix*) result)))))
-    (reader-error (e)
-      (format *error-output* "~&Read error: ~A~%" e))
-    (package-error (e)
-      (format *error-output* "~&Package error: ~A~%" e))
-    (undefined-function (e)
-      (format *error-output* "~&Undefined function: ~A~%"
-              (cell-error-name e)))
-    (unbound-variable (e)
-      (format *error-output* "~&Unbound variable: ~A~%"
-              (cell-error-name e)))
-    (error (e)
-      (format *error-output* "~&Error: ~A~%" e)
-      ;; Hint about backtrace if available
-      (when *last-error-backtrace*
-        (format *error-output* "~&~A~%" (colorize "  Use ,bt for backtrace" *color-dim*)))
-      ;; Optionally invoke error hook
-      (when *error-hook*
-        (funcall *error-hook* e)))))
+             (format t "~&~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
+      (undefined-function (e)
+        (format *error-output* "~&Undefined function: ~A~%"
+                (cell-error-name e)))
+      (unbound-variable (e)
+        (format *error-output* "~&Unbound variable: ~A~%"
+                (cell-error-name e)))
+      (error (e)
+        ;; Give the process a moment to die (quit may be async)
+        (sleep 0.1)
+        ;; If backend connection lost or process died, exit the REPL quietly
+        (unless (and *slynk-connected-p* (inferior-lisp-alive-p))
+          (setf *slynk-connected-p* nil)
+          (invoke-restart 'quit))
+        ;; Print the error for other cases
+        (format *error-output* "~&Error: ~A~%" e)
+        ;; Hint about backtrace if available
+        (when *last-error-backtrace*
+          (format *error-output* "~&~A~%" (colorize "  Use ,bt for backtrace" *color-dim*)))
+        ;; Optionally invoke error hook
+        (when *error-hook*
+          (funcall *error-hook* e))))))

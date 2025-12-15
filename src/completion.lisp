@@ -115,11 +115,118 @@
       (member char '(#\- #\_ #\* #\+ #\/ #\= #\< #\> #\! #\? #\% #\& #\$
                      #\: #\. #\~ #\^ #\,))))
 
+(defun find-string-start (line col)
+  "Find the start of a string if COL is inside a double-quoted string.
+   Returns (values start-pos pathname-literal-p) where start-pos is the position
+   after the opening quote, and pathname-literal-p is T if preceded by #p.
+   Returns NIL if not in a string. Handles escaped quotes."
+  (let ((in-string nil)
+        (string-start nil)
+        (is-pathname-literal nil))
+    (loop for i from 0 below col
+          for char = (char line i)
+          do (cond
+               ;; Escaped character - skip next
+               ((and (char= char #\\) (< (1+ i) col))
+                (incf i))
+               ;; Quote - toggle string state
+               ((char= char #\")
+                (if in-string
+                    (setf in-string nil string-start nil is-pathname-literal nil)
+                    (progn
+                      (setf in-string t string-start (1+ i))
+                      ;; Check if preceded by #p or #P
+                      (when (and (>= i 2)
+                                 (char= (char line (- i 2)) #\#)
+                                 (char-equal (char line (- i 1)) #\p))
+                        (setf is-pathname-literal t)))))))
+    (when in-string
+      (values string-start is-pathname-literal))))
+
+(defun path-like-p (str)
+  "Return T if STR looks like a filesystem path."
+  (and (plusp (length str))
+       (or (char= (char str 0) #\/)           ; Unix absolute
+           (char= (char str 0) #\~)           ; Home directory
+           (and (>= (length str) 2)           ; Unix relative ./
+                (char= (char str 0) #\.)
+                (char= (char str 1) #\/))
+           ;; Windows-specific patterns
+           #+windows (char= (char str 0) #\\) ; Windows UNC or root
+           #+windows (and (>= (length str) 2) ; Windows relative .\
+                          (char= (char str 0) #\.)
+                          (char= (char str 1) #\\))
+           #+windows (and (>= (length str) 3) ; Windows drive C:\ or C:/
+                          (alpha-char-p (char str 0))
+                          (char= (char str 1) #\:)
+                          (or (char= (char str 2) #\\)
+                              (char= (char str 2) #\/))))))
+
+(defvar *pathname-functions*
+  '((load . 1) (compile-file . 1) (probe-file . 1) (delete-file . 1)
+    (open . 1) (directory . 1) (ensure-directories-exist . 1)
+    (file-write-date . 1) (file-author . 1) (truename . 1) (ed . 1)
+    (rename-file . 2) (dribble . 1)
+    ;; with-open-file takes pathname as second element of binding form
+    (with-open-file . 1))
+  "Alist of functions that take pathname arguments and how many path args they take.")
+
+(defun find-enclosing-function (line col)
+  "Find the function name of the enclosing form at COL in LINE.
+   Returns the function name as a lowercase string, or NIL."
+  (let ((depth 0)
+        (func-start nil))
+    ;; Scan backwards to find the opening paren of our form
+    (loop for i from (1- col) downto 0
+          for char = (char line i)
+          do (cond
+               ((char= char #\)) (incf depth))
+               ((char= char #\()
+                (if (plusp depth)
+                    (decf depth)
+                    ;; Found the opening paren - extract function name
+                    (progn
+                      (setf func-start (1+ i))
+                      (return)))))
+          finally (return-from find-enclosing-function nil))
+    (when func-start
+      ;; Extract the function name (first symbol after paren)
+      (let ((end func-start))
+        (loop while (and (< end col)
+                         (let ((c (char line end)))
+                           (or (alphanumericp c)
+                               (member c '(#\- #\_ #\* #\+ #\/)))))
+              do (incf end))
+        (when (> end func-start)
+          (string-downcase (subseq line func-start end)))))))
+
+(defun in-pathname-context-p (line col)
+  "Return T if position COL in LINE is likely a pathname argument.
+   Checks if we're inside a function known to take pathname arguments."
+  (let ((func (find-enclosing-function line col)))
+    (when func
+      (let ((func-sym (intern (string-upcase func) :cl)))
+        (assoc func-sym *pathname-functions*)))))
+
 (defun extract-completion-prefix (line col)
   "Extract the word to complete from LINE ending at COL.
-   Returns (values prefix start-col type) where type is :symbol, :package, :qualified, :keyword, :path, or :command."
+   Returns (values prefix start-col type) where type is :symbol, :package, :qualified, :keyword, :path, :command, or :none."
   (when (zerop col)
     (return-from extract-completion-prefix (values "" 0 :symbol)))
+  ;; Check if we're inside a string
+  (multiple-value-bind (string-start pathname-literal-p) (find-string-start line col)
+    (when string-start
+      (let ((string-content (subseq line string-start col)))
+        ;; Complete as path if: #p"...", string looks like a path, OR we're in a pathname function
+        (if (or pathname-literal-p
+                (path-like-p string-content)
+                (in-pathname-context-p line string-start))
+            (return-from extract-completion-prefix
+              (values string-content string-start :path))
+            ;; Inside a string but not a path context - no completion
+            (return-from extract-completion-prefix
+              (values "" 0 :none))))))
+  ;; Standard word extraction
   (let ((start col))
     ;; Scan backwards to find start of word
     (loop while (and (plusp start)
@@ -373,7 +480,12 @@
 
 (defun compute-completions (prefix type)
   "Compute completion candidates for PREFIX of TYPE using Slynk backend."
+  ;; Don't complete empty prefix (except for paths in pathname context)
+  (when (and (zerop (length prefix))
+             (not (eql type :path)))
+    (return-from compute-completions nil))
   (case type
+    (:none nil)  ; No completion in this context
     (:command (complete-command prefix))
     (:package (complete-package-via-slynk prefix))
     (:system (complete-system-via-slynk prefix))

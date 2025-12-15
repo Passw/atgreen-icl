@@ -140,6 +140,7 @@ jobs:
 
       - name: Build DEB packages (binary and source)
         run: |
+          ln -s releng/debian debian
           dpkg-buildpackage -uc -us
 
       - name: Copy DEB and source files to workspace

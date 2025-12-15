@@ -135,7 +135,9 @@ jobs:
           apt-get install -y debhelper devscripts sbcl libfixposix-dev gcc make
 
       - name: Build DEB packages (binary and source)
-        run: dpkg-buildpackage -uc -us
+        run: |
+          ln -s releng/debian debian
+          dpkg-buildpackage -uc -us
 
       - name: List built packages
         run: |

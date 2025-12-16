@@ -218,8 +218,12 @@
         ;; ASDF not built in, load bundled version
         (load ~S)~])))
   (push ~S (symbol-value (read-from-string \"asdf:*central-registry*\")))
-  (let ((*debug-io* (make-broadcast-stream)))
-    (funcall (read-from-string \"asdf:load-system\") :slynk))
+  ;; Suppress all warnings and output during Slynk loading
+  (let ((*debug-io* (make-broadcast-stream))
+        (*error-output* (make-broadcast-stream))
+        (*standard-output* (make-broadcast-stream)))
+    (handler-bind ((warning #'muffle-warning))
+      (funcall (read-from-string \"asdf:load-system\") :slynk)))
   ;; Disable auth/secret expectations and SWANK->SLYNK translation
   (let ((secret (find-symbol \"SLY-SECRET\" :slynk)))
     (when secret (setf (symbol-function secret) (lambda () nil))))
@@ -227,8 +231,10 @@
     (when auth (setf (symbol-function auth) (lambda (stream) (declare (ignore stream)) nil))))
   (let ((x (find-symbol \"*TRANSLATING-SWANK-TO-SLYNK*\" :slynk-rpc)))
     (when x (setf (symbol-value x) nil)))
-  (funcall (read-from-string \"slynk:create-server\")
-           :port ~D :dont-close t)
+  ;; Suppress Slynk startup message
+  (let ((*standard-output* (make-broadcast-stream)))
+    (funcall (read-from-string \"slynk:create-server\")
+             :port ~D :dont-close t))
   ;; Keep process alive (needed for CLISP with -x which exits after eval)
   (loop (sleep 60)))"
                     (when asdf-file (uiop:unix-namestring asdf-file))
@@ -242,9 +248,15 @@
         (load ql-init))))
   (if (find-package :quicklisp)
       (progn
-        (funcall (read-from-string \"ql:quickload\") :slynk :silent t)
-        (funcall (read-from-string \"slynk:create-server\")
-                 :port ~D :dont-close t))
+        ;; Suppress warnings during Slynk loading
+        (let ((*error-output* (make-broadcast-stream))
+              (*standard-output* (make-broadcast-stream)))
+          (handler-bind ((warning #'muffle-warning))
+            (funcall (read-from-string \"ql:quickload\") :slynk :silent t)))
+        ;; Suppress Slynk startup message
+        (let ((*standard-output* (make-broadcast-stream)))
+          (funcall (read-from-string \"slynk:create-server\")
+                   :port ~D :dont-close t)))
       (error \"Cannot find Slynk. Install SLY or Quicklisp.\")))"
                     port)))))
 

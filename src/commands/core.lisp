@@ -1183,6 +1183,38 @@ Example: ,paredit        ; toggle
   (format t "~C[2K~C[0G" #\Escape #\Escape)
   (force-output))
 
+(defun setup-gemini-mcp-config ()
+  "Create temporary Gemini MCP config for ICL tools. Returns config file path."
+  (let* ((gemini-dir (merge-pathnames ".gemini/" (uiop:getcwd)))
+         (config-file (merge-pathnames "settings.json" gemini-dir))
+         (icl-path (or (uiop:argv0)
+                       (namestring (merge-pathnames "icl" (uiop:getcwd)))))
+         (slynk-addr (format nil "~A:~D" *slynk-host* *slynk-port*)))
+    ;; Ensure .gemini directory exists
+    (ensure-directories-exist config-file)
+    ;; Write MCP config
+    (with-open-file (out config-file :direction :output :if-exists :supersede)
+      (format out "{~%")
+      (format out "  \"mcpServers\": {~%")
+      (format out "    \"icl\": {~%")
+      (format out "      \"command\": ~S,~%" icl-path)
+      (format out "      \"args\": [\"--mcp-server\", ~S],~%" slynk-addr)
+      (format out "      \"timeout\": 30000,~%")
+      (format out "      \"trust\": true~%")
+      (format out "    }~%")
+      (format out "  }~%")
+      (format out "}~%"))
+    config-file))
+
+(defun cleanup-gemini-mcp-config ()
+  "Remove temporary Gemini MCP config."
+  (let ((config-file (merge-pathnames ".gemini/settings.json" (uiop:getcwd))))
+    (when (probe-file config-file)
+      (delete-file config-file))
+    ;; Try to remove .gemini dir if empty
+    (ignore-errors
+      (uiop:delete-empty-directory (merge-pathnames ".gemini/" (uiop:getcwd))))))
+
 (defun run-ai-cli (cli prompt)
   "Run an AI CLI with the given prompt and render markdown output."
   (let* ((program (ai-cli-program cli))
@@ -1190,7 +1222,11 @@ Example: ,paredit        ; toggle
                  (:claude (list program "-p" prompt))
                  (:gemini (list program "-p" prompt))
                  (:codex (list program "-p" prompt))))
+         (use-mcp (and (eq cli :gemini) *slynk-connected-p*))
          (spinner (start-spinner (format nil "Thinking (~A)..." program))))
+    ;; Setup MCP config for Gemini if connected to Slynk
+    (when use-mcp
+      (setup-gemini-mcp-config))
     (unwind-protect
         ;; Capture output and render as markdown
         (let ((output (uiop:run-program args
@@ -1201,18 +1237,32 @@ Example: ,paredit        ; toggle
           (when (and output (> (length output) 0))
             (format t "~A~%" (tuition:render-markdown output :width 80)))
           (terpri))
-      ;; Ensure spinner stops even on error
-      (stop-spinner spinner))))
+      ;; Cleanup
+      (stop-spinner spinner)
+      (when use-mcp
+        (cleanup-gemini-mcp-config)))))
 
-(defun get-system-context ()
-  "Get system context string for AI prompts."
-  (format nil "Context: ~A ~A~@[, Slynk connected to ~A~]"
-          (or *current-lisp* "Unknown Lisp")
-          (or (ignore-errors
-                (first (backend-eval "(lisp-implementation-version)")))
-              "")
-          (when *slynk-connected-p*
-            (format nil "~A:~D" *slynk-host* *slynk-port*))))
+(defun get-system-context (&key with-mcp-tools)
+  "Get system context string for AI prompts.
+   If WITH-MCP-TOOLS is true, include info about available MCP tools."
+  (let ((base (format nil "Context: ~A ~A~@[, Slynk connected to ~A~]"
+                      (or *current-lisp* "Unknown Lisp")
+                      (or (ignore-errors
+                            (first (backend-eval "(lisp-implementation-version)")))
+                          "")
+                      (when *slynk-connected-p*
+                        (format nil "~A:~D" *slynk-host* *slynk-port*)))))
+    (if with-mcp-tools
+        (format nil "~A~%~%You have access to ICL MCP tools to query the Lisp environment:
+- get_documentation: Get docstring for a symbol (function, variable, or type)
+- describe_symbol: Get full description of a symbol
+- apropos_search: Search for symbols by name pattern
+- list_package_symbols: List all exported symbols from a package
+- get_function_arglist: Get the lambda list for a function/macro
+- read_source_file: Read source code from library files in ocicl/
+- list_source_files: List available source files in ocicl/
+Use these tools to look up documentation, explore symbols, or read library source code." base)
+        base)))
 
 (define-command explain (&rest args)
   "Ask AI to explain the last expression/command output, or specific code.
@@ -1231,7 +1281,8 @@ Examples:
                (last-form icl-+)
                (last-result icl-*)
                (input (string-trim '(#\Space #\Tab) (format nil "~{~A~^ ~}" args)))
-               (context (get-system-context))
+               ;; Include MCP tools info for gemini
+               (context (get-system-context :with-mcp-tools (eq cli :gemini)))
                (prompt
                  (cond
                    ;; No args - explain based on what happened last

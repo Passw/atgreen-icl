@@ -71,6 +71,14 @@
    :key :verbose
    :description "Show verbose startup information"))
 
+(defun make-mcp-server-option ()
+  "Create --mcp-server option to run as MCP server."
+  (clingon:make-option
+   :string
+   :long-name "mcp-server"
+   :key :mcp-server
+   :description "Run as MCP server, connecting to Slynk at host:port"))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; CLI Handler
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -91,7 +99,14 @@
         (no-banner (clingon:getopt cmd :no-banner))
         (lisp-impl (clingon:getopt cmd :lisp))
         (connect-str (clingon:getopt cmd :connect))
-        (verbose (clingon:getopt cmd :verbose)))
+        (verbose (clingon:getopt cmd :verbose))
+        (mcp-server (clingon:getopt cmd :mcp-server)))
+    ;; MCP server mode - special handling, runs without config
+    (when mcp-server
+      (multiple-value-bind (host port)
+          (parse-connect-string mcp-server)
+        (run-mcp-server :host host :port port))
+      (uiop:quit 0))
     ;; Set verbose mode
     (setf *verbose* verbose)
     ;; Load config FIRST so *default-lisp* can be set
@@ -180,7 +195,8 @@ and an extensible command system."
                   (make-no-banner-option)
                   (make-lisp-option)
                   (make-connect-option)
-                  (make-verbose-option))
+                  (make-verbose-option)
+                  (make-mcp-server-option))
    :handler #'handle-cli
    :examples '(("Start REPL (auto-detects Lisp):" . "icl")
                ("Evaluate an expression:" . "icl -e '(+ 1 2)'")

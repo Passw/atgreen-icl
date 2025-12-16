@@ -19,6 +19,8 @@
                ;; Utilities
                :alexandria
                :split-sequence
+               ;; JSON for MCP protocol
+               :yason
                ;; Markdown rendering for AI output
                :tuition
                ;; POSIX-only dependencies
@@ -46,6 +48,7 @@
                   :components
                   ((:file "registry")
                    (:file "core")))
+                 (:file "mcp-server")
                  (:file "repl")
                  (:file "main"))))
   :build-operation "program-op"

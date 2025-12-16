@@ -59,6 +59,8 @@ trivial-features, ghcr.io/ocicl/trivial-features@sha256:e278e24d39060fc7d3715531
 trivial-features-tests, ghcr.io/ocicl/trivial-features@sha256:e278e24d39060fc7d3715531b16ddd9ab7f93f22ade53e436c0b86dbae3aa065, trivial-features-1.0/trivial-features-tests.asd
 trivial-file-size, ghcr.io/ocicl/trivial-file-size@sha256:dfe138877e024d36e51fa14b1bcabf11e99e5745baa42ef4f627438485030f5c, trivial-file-size-20250427-60fd1bf/trivial-file-size.asd
 trivial-garbage, ghcr.io/ocicl/trivial-garbage@sha256:a85dcf4110ad60ae9f6c70970acceb2bf12402ce5326891643d35506059afb1d, trivial-garbage-20240503-3474f64/trivial-garbage.asd
+trivial-gray-streams, ghcr.io/ocicl/trivial-gray-streams@sha256:d0cc9fb73876100ee60647524f98b5b22566fa1c3a985d79548b0d2b228f8b51, trivial-gray-streams-20240503-a7ead68/trivial-gray-streams.asd
+trivial-gray-streams-test, ghcr.io/ocicl/trivial-gray-streams@sha256:d0cc9fb73876100ee60647524f98b5b22566fa1c3a985d79548b0d2b228f8b51, trivial-gray-streams-20240503-a7ead68/trivial-gray-streams-test.asd
 trivial-macroexpand-all, ghcr.io/ocicl/trivial-macroexpand-all@sha256:b23da4c2e508efe2396ec8f721cb22b8a4c076b2f0aea014a09f69dfd716d7f8, trivial-macroexpand-all-20250518-b6e4efa/trivial-macroexpand-all.asd
 trivial-timeout, ghcr.io/ocicl/trivial-timeout@sha256:18f5f87e1fa3a35e5608cd424d22c2b24f581f810d9f9f8c6229b849c2f239ad, trivial-timeout-20240503-e70d9b4/trivial-timeout.asd
 trivial-timeout-test, ghcr.io/ocicl/trivial-timeout@sha256:18f5f87e1fa3a35e5608cd424d22c2b24f581f810d9f9f8c6229b849c2f239ad, trivial-timeout-20240503-e70d9b4/trivial-timeout-test.asd
@@ -71,3 +73,5 @@ usocket-server, ghcr.io/ocicl/usocket@sha256:282856b819b22a4319ba30a15605ee934aa
 usocket-test, ghcr.io/ocicl/usocket@sha256:282856b819b22a4319ba30a15605ee934aa23292a471fd29ea4d3f2074b3f16d, usocket-0.8.8/usocket-test.asd
 version-string, ghcr.io/ocicl/version-string@sha256:0d6103de97750f7a85d84b38b2495399817d550ce1e2369ba31a652e39e2b2e7, cl-version-string-20250701-2a9f9ba/version-string.asd
 with-user-abort, ghcr.io/ocicl/with-user-abort@sha256:c19560034f9909a7afb4110b5efd939a9f1e829d9ef9887797b98679f290c480, with-user-abort-20240503-a3db02e/with-user-abort.asd
+yason, ghcr.io/ocicl/yason@sha256:d4857f9cbdd68a5d1332c7f8a4a2374b1ae0dc567d4b8f90795ff38fd490876b, yason-20250323-0c84b29/yason.asd
+yason-tests, ghcr.io/ocicl/yason@sha256:d4857f9cbdd68a5d1332c7f8a4a2374b1ae0dc567d4b8f90795ff38fd490876b, yason-20250323-0c84b29/yason-tests.asd

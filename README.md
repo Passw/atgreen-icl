@@ -188,7 +188,7 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 | `,explain <code>` | Explain specific code |
 | `,ai-cli [name]` | Show or set AI backend (gemini, claude, codex) |
 
-The `,explain` command uses an AI CLI (auto-detected from PATH) to provide explanations of Lisp code, errors, and results. When using Gemini CLI, ICL provides an MCP server that gives the AI **read-only** access to the live Lisp environment - it can query documentation, describe symbols, and search for functions, but **cannot execute any code**.
+The `,explain` command uses an AI CLI (auto-detected from PATH) to provide explanations of Lisp code, errors, and results. When using Gemini or Claude CLI, ICL provides an MCP server that gives the AI **read-only** access to the live Lisp environment - it can query documentation, describe symbols, and search for functions, but **cannot execute any code**.
 
 Requires one of: [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Claude CLI](https://github.com/anthropics/claude-code), or [Codex CLI](https://github.com/openai/codex)
 

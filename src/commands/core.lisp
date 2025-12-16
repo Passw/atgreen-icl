@@ -1215,22 +1215,54 @@ Example: ,paredit        ; toggle
     (ignore-errors
       (uiop:delete-empty-directory (merge-pathnames ".gemini/" (uiop:getcwd))))))
 
+(defun setup-claude-mcp-config ()
+  "Create temporary Claude MCP config for ICL tools. Returns config file path."
+  (let* ((config-file (merge-pathnames ".mcp.json" (uiop:getcwd)))
+         (icl-path (or (uiop:argv0)
+                       (namestring (merge-pathnames "icl" (uiop:getcwd)))))
+         (slynk-addr (format nil "~A:~D" *slynk-host* *slynk-port*)))
+    ;; Write MCP config (Claude Code requires "type": "stdio" for local servers)
+    (with-open-file (out config-file :direction :output :if-exists :supersede)
+      (format out "{~%")
+      (format out "  \"mcpServers\": {~%")
+      (format out "    \"icl\": {~%")
+      (format out "      \"type\": \"stdio\",~%")
+      (format out "      \"command\": ~S,~%" icl-path)
+      (format out "      \"args\": [\"--mcp-server\", ~S]~%" slynk-addr)
+      (format out "    }~%")
+      (format out "  }~%")
+      (format out "}~%"))
+    config-file))
+
+(defun cleanup-claude-mcp-config ()
+  "Remove temporary Claude MCP config."
+  (let ((config-file (merge-pathnames ".mcp.json" (uiop:getcwd))))
+    (when (probe-file config-file)
+      (delete-file config-file))))
+
 (defun run-ai-cli (cli prompt)
   "Run an AI CLI with the given prompt, streaming output with markdown rendering."
   (let* ((program (ai-cli-program cli))
+         (use-mcp (and (member cli '(:gemini :claude)) *slynk-connected-p*))
          (args (ecase cli
-                 (:claude (list program "-p" prompt))
+                 (:claude (if use-mcp
+                              ;; Use --mcp-config to load our MCP server in -p mode
+                              (list program "-p" prompt "--mcp-config" ".mcp.json")
+                              (list program "-p" prompt)))
                  (:gemini (list program "-p" prompt))
-                 (:codex (list program "-p" prompt))))
-         (use-mcp (and (eq cli :gemini) *slynk-connected-p*)))
-    ;; Setup MCP config for Gemini if connected to Slynk
+                 (:codex (list program "-p" prompt)))))
+    ;; Setup MCP config if connected to Slynk
     (when use-mcp
-      (setup-gemini-mcp-config))
+      (ecase cli
+        (:gemini (setup-gemini-mcp-config))
+        (:claude (setup-claude-mcp-config))))
     (unwind-protect
         (run-ai-cli-streaming program args)
       ;; Cleanup
       (when use-mcp
-        (cleanup-gemini-mcp-config)))))
+        (ecase cli
+          (:gemini (cleanup-gemini-mcp-config))
+          (:claude (cleanup-claude-mcp-config)))))))
 
 (defun run-ai-cli-streaming (program args)
   "Run AI CLI, buffering output and rendering as markdown at the end.
@@ -1307,23 +1339,24 @@ Example: ,paredit        ; toggle
                       (when *slynk-connected-p*
                         (format nil "~A:~D" *slynk-host* *slynk-port*)))))
     (if with-mcp-tools
-        (format nil "~A~%~%You have access to ICL MCP tools to query the Lisp environment:
+        (format nil "~A~%~%You have access to ICL MCP tools to query the live Lisp environment. ALWAYS use these tools to look up information about symbols, functions, and packages mentioned in the code - do not guess or rely on general knowledge.
+
+Available tools:
 - get_documentation: Get docstring for a symbol (function, variable, or type)
-- describe_symbol: Get full description of a symbol
+- describe_symbol: Get full description of a symbol including its current value/definition
 - apropos_search: Search for symbols by name pattern
 - list_package_symbols: List all exported symbols from a package
 - get_function_arglist: Get the lambda list for a function/macro
 - read_source_file: Read source code from library files in ocicl/
 - list_source_files: List available source files in ocicl/
-Use these tools to look up documentation, explore symbols, or read library source code.
 
-IMPORTANT: Before calling any tool, output a visual marker so the user can see when tools are being used. Example:
+Before calling any tool, output a visual marker so the user can see when tools are being used. Example:
 
 Let me look up the documentation for that function.
 
-*[Invoking get_documentation]*
+*[Invoking describe_symbol]*
 
-According to the documentation, MAPCAR takes..." base)
+According to the description, FOO is defined as..." base)
         base)))
 
 (define-command explain (&rest args)
@@ -1343,8 +1376,8 @@ Examples:
                (last-form icl-+)
                (last-result icl-*)
                (input (string-trim '(#\Space #\Tab) (format nil "~{~A~^ ~}" args)))
-               ;; Include MCP tools info for gemini
-               (context (get-system-context :with-mcp-tools (eq cli :gemini)))
+               ;; Include MCP tools info for gemini and claude
+               (context (get-system-context :with-mcp-tools (member cli '(:gemini :claude))))
                (prompt
                  (cond
                    ;; No args - explain based on what happened last

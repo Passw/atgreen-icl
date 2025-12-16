@@ -1216,31 +1216,108 @@ Example: ,paredit        ; toggle
       (uiop:delete-empty-directory (merge-pathnames ".gemini/" (uiop:getcwd))))))
 
 (defun run-ai-cli (cli prompt)
-  "Run an AI CLI with the given prompt and render markdown output."
+  "Run an AI CLI with the given prompt, streaming output with markdown rendering."
   (let* ((program (ai-cli-program cli))
          (args (ecase cli
                  (:claude (list program "-p" prompt))
                  (:gemini (list program "-p" prompt))
                  (:codex (list program "-p" prompt))))
-         (use-mcp (and (eq cli :gemini) *slynk-connected-p*))
-         (spinner (start-spinner (format nil "Thinking (~A)..." program))))
+         (use-mcp (and (eq cli :gemini) *slynk-connected-p*)))
     ;; Setup MCP config for Gemini if connected to Slynk
     (when use-mcp
       (setup-gemini-mcp-config))
     (unwind-protect
-        ;; Capture output and render as markdown
-        (let ((output (uiop:run-program args
-                                        :output :string
-                                        :error-output :output
-                                        :ignore-error-status t)))
-          (stop-spinner spinner)
-          (when (and output (> (length output) 0))
-            (format t "~A~%" (tuition:render-markdown output :width 80)))
-          (terpri))
+        (run-ai-cli-streaming program args)
       ;; Cleanup
-      (stop-spinner spinner)
       (when use-mcp
         (cleanup-gemini-mcp-config)))))
+
+(defun run-ai-cli-streaming (program args)
+  "Run AI CLI with streaming output and incremental markdown rendering."
+  (let* ((process (uiop:launch-program args
+                                       :output :stream
+                                       :error-output :stream))
+         (out-stream (uiop:process-info-output process))
+         (err-stream (uiop:process-info-error-output process))
+         (output-buffer (make-array 0 :element-type 'character
+                                      :adjustable t :fill-pointer 0))
+         (first-output nil)
+         (last-render-time (get-internal-real-time))
+         (render-interval (* 0.15 internal-time-units-per-second))  ; 150ms
+         (last-rendered-lines 0)
+         (spinner-frames *spinner-frames*)
+         (spinner-idx 0))
+    (unwind-protect
+        (loop
+          (let ((out-ready (listen out-stream))
+                (err-ready (listen err-stream)))
+            ;; Check if process is done and streams are empty
+            (when (and (not out-ready)
+                       (not err-ready)
+                       (not (uiop:process-alive-p process)))
+              ;; Final render with complete content
+              (when (> (length output-buffer) 0)
+                ;; Clear previous rendered content
+                (when (> last-rendered-lines 0)
+                  (format t "~C[~DA~C[J" #\Escape last-rendered-lines #\Escape))
+                ;; Render final markdown
+                (format t "~A~%" (tuition:render-markdown
+                                 (coerce output-buffer 'string)
+                                 :width 80)))
+              (return))
+            ;; Show spinner while waiting for first output
+            (cond
+              ((and (not out-ready) (not err-ready) (not first-output))
+               (format t "~C[2K~A Thinking (~A)...~C[0G"
+                       #\Escape
+                       (nth spinner-idx spinner-frames)
+                       program
+                       #\Escape)
+               (force-output)
+               (setf spinner-idx (mod (1+ spinner-idx) (length spinner-frames)))
+               (sleep 0.08))
+              ;; Read stderr (MCP messages, etc) - display with prefix
+              (err-ready
+               (unless first-output
+                 (format t "~C[2K~C[0G" #\Escape #\Escape)
+                 (setf first-output t))
+               (let ((line (read-line err-stream nil nil)))
+                 (when line
+                   (format t "~A~A (~A): ~A~A~%"
+                           *ansi-dim* "MCP STDERR" program line *ansi-reset*)
+                   (force-output))))
+              ;; Accumulate stdout
+              (out-ready
+               (unless first-output
+                 (format t "~C[2K~C[0G" #\Escape #\Escape)
+                 (setf first-output t)
+                 (terpri))
+               (let ((char (read-char out-stream nil nil)))
+                 (when char
+                   (vector-push-extend char output-buffer)
+                   ;; Check if it's time to re-render
+                   (let ((now (get-internal-real-time)))
+                     (when (> (- now last-render-time) render-interval)
+                       ;; Clear previous render
+                       (when (> last-rendered-lines 0)
+                         (format t "~C[~DA~C[J" #\Escape last-rendered-lines #\Escape))
+                       ;; Render current content
+                       (let ((rendered (tuition:render-markdown
+                                        (coerce output-buffer 'string)
+                                        :width 80)))
+                         (format t "~A" rendered)
+                         (force-output)
+                         ;; Count lines for next clear
+                         (setf last-rendered-lines
+                               (1+ (count #\Newline rendered)))
+                         (setf last-render-time now)))))))
+              ;; Small sleep to avoid busy-waiting
+              (t
+               (sleep 0.01)))))
+      ;; Cleanup
+      (ignore-errors (close out-stream))
+      (ignore-errors (close err-stream))
+      (uiop:wait-process process))))
 
 (defun get-system-context (&key with-mcp-tools)
   "Get system context string for AI prompts.

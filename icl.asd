@@ -19,6 +19,8 @@
                ;; Utilities
                :alexandria
                :split-sequence
+               ;; Markdown rendering for AI output
+               :tuition
                ;; POSIX-only dependencies
                (:feature (:not :windows) :osicat))
   :serial t

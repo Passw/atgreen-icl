@@ -10,8 +10,9 @@
 ;;; History Management
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun update-history (form values)
-  "Update history variables with new form and values."
+(defun update-result-history (form values)
+  "Update result history variables with VALUES. FORM is unused but kept for hook compatibility."
+  (declare (ignore form))
   ;; Rotate result history (both icl-* and IRB-style _)
   (setf icl-*** icl-**
         icl-** icl-*
@@ -19,16 +20,10 @@
         ___ __
         __ _
         _ (first values))
-  ;; Rotate input history
-  (setf icl-+++ icl-++
-        icl-++ icl-+
-        icl-+ form)
   ;; Rotate values history
   (setf icl-/// icl-//
         icl-// icl-/
-        icl-/ values)
-  ;; Increment input count
-  (incf *input-count*))
+        icl-/ values))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Hooks
@@ -60,6 +55,14 @@
   (let ((*package* *icl-package*))
     (read-from-string input)))
 
+(defun update-input-history (form)
+  "Update input history (icl-+) with FORM. Called before evaluation."
+  (setf icl-+++ icl-++
+        icl-++ icl-+
+        icl-+ form)
+  ;; Increment input count
+  (incf *input-count*))
+
 (defun eval-and-print (input)
   "Parse, evaluate, and print results from INPUT string.
    Handles all errors gracefully. Uses Slynk backend for evaluation."
@@ -67,16 +70,18 @@
   ;; (e.g., if the form uses packages only defined in the backend)
   (let ((form (ignore-errors (read-form input))))
     (when form
+      ;; Update input history BEFORE evaluation so it's captured even on error
+      (update-input-history form)
       (run-before-eval-hooks form))
     (handler-case
         (let ((result (backend-eval input)))
-          ;; Update history/hooks with best-effort values
+          ;; Update result history/hooks with best-effort values
           (let ((values (cond
                           ((listp result) result)
                           ((null result) nil)
                           (t (list result)))))
             (when (and form values)
-              (update-history form values))
+              (update-result-history form values))
             (when form
               (run-after-eval-hooks form values)))
           ;; Handle the result for display

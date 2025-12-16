@@ -106,7 +106,8 @@
           (case (first result)
             (:ok
              (setf *last-error-backtrace* nil
-                   *last-error-condition* nil)
+                   *last-error-condition* nil
+                   *last-was-error* nil)
              ;; Print captured output first
              (let ((output (second result))
                    (vals (third result)))
@@ -116,7 +117,8 @@
                vals))
             (:error
              (setf *last-error-condition* (second result)
-                   *last-error-backtrace* (third result))
+                   *last-error-backtrace* (third result)
+                   *last-was-error* t)
              (error "~A" (second result)))
             (otherwise result)))
       (slynk-client:slime-network-error (e)

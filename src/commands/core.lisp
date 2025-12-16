@@ -800,7 +800,11 @@ Example: ,dis mapcar"
   (handler-case
       (let ((result (slynk-disassemble symbol-name)))
         (if result
-            (format t "~&~A~%" result)
+            (progn
+              ;; Store for ,explain
+              (setf *last-command-output* result
+                    *last-command-name* (format nil "disassemble ~A" symbol-name))
+              (format t "~&~A~%" result))
             (format *error-output* "~&No disassembly available for: ~A~%" symbol-name)))
     (error (e)
       (format *error-output* "~&Error: ~A~%" e))))
@@ -1110,3 +1114,185 @@ Example: ,paredit        ; toggle
      (format t "~&Paredit mode: disabled~%"))
     (t
      (format *error-output* "~&Invalid argument: ~A (use on/off)~%" state))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; AI CLI Integration
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defun ai-cli-available-p (cli)
+  "Check if an AI CLI tool is available in PATH."
+  (let ((program (ecase cli
+                   (:claude "claude")
+                   (:gemini "gemini")
+                   (:codex "codex"))))
+    (ignore-errors
+      (multiple-value-bind (output error-output exit-code)
+          (uiop:run-program (list program "--version")
+                            :output nil
+                            :error-output nil
+                            :ignore-error-status t)
+        (declare (ignore output error-output))
+        (zerop exit-code)))))
+
+(defun detect-ai-cli ()
+  "Detect available AI CLI, trying gemini, claude, codex in order."
+  (cond
+    (*ai-cli* *ai-cli*)  ; User configured
+    ((ai-cli-available-p :gemini) :gemini)
+    ((ai-cli-available-p :claude) :claude)
+    ((ai-cli-available-p :codex) :codex)
+    (t nil)))
+
+(defun ai-cli-program (cli)
+  "Return the program name for an AI CLI."
+  (ecase cli
+    (:claude "claude")
+    (:gemini "gemini")
+    (:codex "codex")))
+
+(defvar *spinner-frames* '("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  "Braille spinner animation frames.")
+
+(defvar *spinner-running* nil
+  "Flag to control spinner thread.")
+
+(defun start-spinner (message)
+  "Start a spinner with MESSAGE. Returns the spinner thread."
+  (setf *spinner-running* t)
+  (let ((frames *spinner-frames*)
+        (idx 0))
+    (sb-thread:make-thread
+     (lambda ()
+       (loop while *spinner-running* do
+         (format t "~C[2K~A ~A~C[0G"
+                 #\Escape        ; ESC[2K clears line
+                 (nth idx frames)
+                 message
+                 #\Escape)       ; ESC[0G returns to column 0
+         (force-output)
+         (setf idx (mod (1+ idx) (length frames)))
+         (sleep 0.08)))
+     :name "spinner")))
+
+(defun stop-spinner (thread)
+  "Stop the spinner THREAD and clear the line."
+  (setf *spinner-running* nil)
+  (ignore-errors
+    (sb-thread:join-thread thread :timeout 0.5))
+  ;; Clear the spinner line
+  (format t "~C[2K~C[0G" #\Escape #\Escape)
+  (force-output))
+
+(defun run-ai-cli (cli prompt)
+  "Run an AI CLI with the given prompt and render markdown output."
+  (let* ((program (ai-cli-program cli))
+         (args (ecase cli
+                 (:claude (list program "-p" prompt))
+                 (:gemini (list program "-p" prompt))
+                 (:codex (list program "-p" prompt))))
+         (spinner (start-spinner (format nil "Thinking (~A)..." program))))
+    (unwind-protect
+        ;; Capture output and render as markdown
+        (let ((output (uiop:run-program args
+                                        :output :string
+                                        :error-output :output
+                                        :ignore-error-status t)))
+          (stop-spinner spinner)
+          (when (and output (> (length output) 0))
+            (format t "~A~%" (tuition:render-markdown output :width 80)))
+          (terpri))
+      ;; Ensure spinner stops even on error
+      (stop-spinner spinner))))
+
+(defun get-system-context ()
+  "Get system context string for AI prompts."
+  (format nil "Context: ~A ~A~@[, Slynk connected to ~A~]"
+          (or *current-lisp* "Unknown Lisp")
+          (or (ignore-errors
+                (first (backend-eval "(lisp-implementation-version)")))
+              "")
+          (when *slynk-connected-p*
+            (format nil "~A:~D" *slynk-host* *slynk-port*))))
+
+(define-command explain (&rest args)
+  "Ask AI to explain the last expression/command output, or specific code.
+Uses claude, gemini, or codex CLI (auto-detected or set via *ai-cli*).
+
+Examples:
+  ,explain              - Explain the last result (or error if one occurred)
+  ,explain (defmacro...)- Explain specific code"
+  (let ((cli (detect-ai-cli)))
+    (if (not cli)
+        (format *error-output* "~&No AI CLI found. Install one of: claude, gemini, codex~%")
+        ;; Capture error state BEFORE get-system-context, which may clear it
+        (let* ((was-error *last-was-error*)
+               (error-condition *last-error-condition*)
+               (error-backtrace *last-error-backtrace*)
+               (last-form icl-+)
+               (last-result icl-*)
+               (input (string-trim '(#\Space #\Tab) (format nil "~{~A~^ ~}" args)))
+               (context (get-system-context))
+               (prompt
+                 (cond
+                   ;; No args - explain based on what happened last
+                   ((or (null args) (string= input ""))
+                    (cond
+                      ;; Command output takes priority (e.g., disassembly)
+                      (*last-command-output*
+                       (prog1
+                           (format nil "~A~%~%Explain this Common Lisp ~A output:~%~%~A"
+                                   context
+                                   (or *last-command-name* "command")
+                                   *last-command-output*)
+                         ;; Clear after use
+                         (setf *last-command-output* nil
+                               *last-command-name* nil)))
+                      ;; If last action was an error, explain it
+                      (was-error
+                       (format nil "~A~%~%Explain this Common Lisp error and suggest how to fix it:~%~%Expression: ~S~%~%Error: ~A~%~%~@[Backtrace:~%~A~]"
+                               context
+                               last-form
+                               error-condition
+                               error-backtrace))
+                      ;; Otherwise explain last expression and result
+                      (t
+                       (format nil "~A~%~%Explain this Common Lisp expression and its result:~%~%Expression: ~S~%~%Result: ~S"
+                               context
+                               last-form last-result))))
+                   ;; Specific code/expression
+                   (t
+                    (format nil "~A~%~%Explain this Common Lisp code:~%~%~A"
+                            context input)))))
+          (when prompt
+            (run-ai-cli cli prompt))))))
+
+(define-command (ai-cli set-ai) (&optional cli-name)
+  "Show or set which AI CLI to use for ,explain.
+Example: ,ai-cli          - Show current setting and available CLIs
+         ,ai-cli claude   - Use Claude CLI
+         ,ai-cli gemini   - Use Gemini CLI
+         ,ai-cli codex    - Use Codex CLI
+         ,ai-cli auto     - Auto-detect (default)"
+  (if cli-name
+      ;; Set the CLI
+      (let ((cli (cond
+                   ((string-equal cli-name "claude") :claude)
+                   ((string-equal cli-name "gemini") :gemini)
+                   ((string-equal cli-name "codex") :codex)
+                   ((string-equal cli-name "auto") :auto)
+                   (t nil))))
+        (if (not cli)
+            (format *error-output* "~&Unknown CLI: ~A (use claude, gemini, codex, or auto)~%" cli-name)
+            (progn
+              (setf *ai-cli* (if (eq cli :auto) nil cli))
+              (format t "~&AI CLI set to: ~A~%" (if (eq cli :auto) "auto-detect" cli)))))
+      ;; Show current setting
+      (progn
+        (format t "~&AI CLI Configuration:~%")
+        (format t "  Current setting: ~A~%" (or *ai-cli* "auto-detect"))
+        (format t "  Detected CLI: ~A~%" (or (detect-ai-cli) "none"))
+        (format t "~%Available CLIs:~%")
+        (dolist (cli '(:claude :gemini :codex))
+          (format t "  ~(~A~): ~A~%"
+                  cli
+                  (if (ai-cli-available-p cli) "installed" "not found"))))))

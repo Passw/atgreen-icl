@@ -130,4 +130,30 @@
 (defvar *verbose* nil
   "When T, print verbose startup information.")
 
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Command Output Capture
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *last-command-output* nil
+  "The output from the last command (for use with ,explain).")
+
+(defvar *last-command-name* nil
+  "The name of the last command that produced output.")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Last Action Tracking
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *last-was-error* nil
+  "T if the last REPL action resulted in an error.")
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; AI CLI Configuration
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defvar *ai-cli* nil
+  "AI CLI tool to use for ,explain command.
+   Valid values: :claude, :gemini, :codex, or NIL for auto-detect.
+   Auto-detection tries claude, gemini, codex in order.")
+
 

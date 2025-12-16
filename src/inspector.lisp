@@ -194,6 +194,10 @@
     (when (> total max-visible)
       (format t "~C[2K~A [~D/~D]~A~%" #\Escape *ansi-dim* (1+ selected) total *ansi-reset*)
       (incf lines-to-draw))
+    ;; Clear any leftover lines from previous render (if we drew fewer lines this time)
+    (when (> *inspector-lines-drawn* lines-to-draw)
+      (dotimes (i (- *inspector-lines-drawn* lines-to-draw))
+        (format t "~C[2K~%" #\Escape)))
     ;; Remember how many lines we drew
     (setf *inspector-lines-drawn* lines-to-draw)
     (force-output)))

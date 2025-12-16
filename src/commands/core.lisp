@@ -1031,7 +1031,7 @@ Example: ,ql cl-ppcre"
              ((find-package '#:OCICL-RUNTIME)
               (progv (list (find-symbol \"*DOWNLOAD*\" '#:OCICL-RUNTIME)
                            (find-symbol \"*VERBOSE*\" '#:OCICL-RUNTIME))
-                  (list t t)
+                  (list t nil)
                 (asdf:load-system system))
               (format nil \"Loaded ~~A via ocicl\" system))
              ;; Try Quicklisp
@@ -1256,7 +1256,7 @@ Examples:
                                error-backtrace))
                       ;; Otherwise explain last expression and result
                       (t
-                       (format nil "~A~%~%Explain this Common Lisp expression and its result:~%~%Expression: ~S~%~%Result: ~S"
+                       (format nil "~A~%~%Explain this Common Lisp expression and its result:~%~%Expression: ~S~%~%Result: ~A"
                                context
                                last-form last-result))))
                    ;; Specific code/expression

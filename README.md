@@ -77,7 +77,7 @@ Connect to an existing Slynk server:
 icl --connect localhost:4005
 ```
 
-Skip loading ~/.iclrc:
+Skip loading config file:
 ```sh
 icl --no-config
 ```
@@ -166,7 +166,7 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 | Command | Description |
 |---------|-------------|
 | `,show-config` | Show config file location and customization options |
-| `,reload-config` | Reload ~/.iclrc |
+| `,reload-config` | Reload config file |
 | `,paredit [on/off]` | Toggle paredit structural editing mode |
 
 ### Session
@@ -206,7 +206,17 @@ ICL maintains history of recent values and inputs:
 
 ## Configuration
 
-ICL loads `~/.iclrc` on startup (unless `--no-config` is specified). This file can contain any Common Lisp code.
+ICL loads a config file on startup (unless `--no-config` is specified). This file can contain any Common Lisp code.
+
+**Config file locations:**
+- **Linux/macOS:** `$XDG_CONFIG_HOME/icl/config.lisp` (default: `~/.config/icl/config.lisp`)
+- **Windows:** `%APPDATA%\icl\config.lisp`
+
+**History file locations:**
+- **Linux/macOS:** `$XDG_STATE_HOME/icl/history` (default: `~/.local/state/icl/history`)
+- **Windows:** `%LOCALAPPDATA%\icl\history`
+
+Use `,show-config` to see the actual paths on your system.
 
 ### Configuration Variables
 
@@ -232,7 +242,7 @@ Use `configure-lisp` to customize how ICL invokes a Lisp implementation:
 - **`:args`** - List of command-line arguments
 - **`:eval-arg`** - The eval flag (e.g., `"--eval"`)
 
-### Example `~/.iclrc`
+### Example Config File
 
 ```lisp
 ;; Use CCL instead of SBCL

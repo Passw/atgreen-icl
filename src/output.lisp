@@ -230,14 +230,15 @@
 
 (defun print-values (values)
   "Print evaluation results with syntax highlighting.
-   VALUES is a list of strings (printed representations from backend)."
+   VALUES is a list of strings (printed representations from backend).
+   Note: Caller is responsible for ensuring we start on a fresh line."
   (let ((prefix (colorize *result-prefix* *color-prefix*)))
     (cond
       ((null values)
-       (format t "~&~A~A~%" prefix (colorize "; No values" *color-dim*)))
+       (format t "~A~A~%" prefix (colorize "; No values" *color-dim*)))
       ((= 1 (length values))
        (let ((v (first values)))
-         (format t "~&~A~A~%"
+         (format t "~A~A~%"
                  prefix
                  (if (stringp v)
                      (format-result-string v)
@@ -246,7 +247,7 @@
        ;; Multiple values
        (loop for v in values
              for i from 0
-             do (format t "~&~A~A ~A~%"
+             do (format t "~A~A ~A~%"
                         prefix
                         (colorize (format nil "[~D]" i) *color-dim*)
                         (if (stringp v)

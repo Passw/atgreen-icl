@@ -409,7 +409,7 @@
         (format t "~&; Process status: ~A~%" (sb-ext:process-status *inferior-process*)))
       ;; Wait for Slynk to start with spinner
       (let ((ticks 0)
-            (max-ticks 100)  ; 10 seconds max
+            (max-ticks 420)  ; 42 seconds max
             (message (format nil "Starting ~A..." lisp))
             #+sbcl (proc-output (sb-ext:process-output *inferior-process*)))
         (loop

@@ -100,6 +100,7 @@
                               (t (format nil "~S" result)))))
             (record-repl-interaction input result-str nil))
           ;; Handle the result for display
+          ;; Note: Editor already printed newline, so we're at start of line
           (cond
             ((null result)
              ;; No result - might be output already printed
@@ -107,7 +108,7 @@
             ((stringp result)
              ;; listener-eval returns string representation
              (unless (string= result "")
-               (format t "~&~A~A~%"
+               (format t "~A~A~%"
                        (colorize *result-prefix* *color-prefix*)
                        result)))
             ((listp result)
@@ -115,7 +116,7 @@
              (print-values result))
             (t
              ;; Unexpected result type - print as-is
-             (format t "~&~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
+             (format t "~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
       (undefined-function (e)
         (let ((msg (format nil "Undefined function: ~A" (cell-error-name e))))
           (record-repl-interaction input msg t)

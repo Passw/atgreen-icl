@@ -458,8 +458,17 @@ Be thorough - users expect you to leverage this live environment access."
   "Instructions provided to LLMs via MCP initialize response.")
 
 (defun handle-initialize (id params)
-  "Handle MCP initialize request."
+  "Handle MCP initialize request.
+   Enforces single session - rejects if already initialized."
   (declare (ignore params))
+  ;; Single session enforcement
+  (when *mcp-session-initialized*
+    (mcp-log "Rejecting initialize: session already active")
+    (return-from handle-initialize
+      (make-json-error id -32600 "Session already initialized. Only one client allowed.")))
+  ;; Mark session as initialized
+  (setf *mcp-session-initialized* t)
+  (mcp-log "Session initialized")
   (let ((result (make-hash-table :test 'equal))
         (capabilities (make-hash-table :test 'equal))
         (tools-cap (make-hash-table :test 'equal))
@@ -502,6 +511,8 @@ Be thorough - users expect you to leverage this live environment access."
 
 (defun handle-mcp-request (request)
   "Handle an MCP JSON-RPC request. Returns response string."
+  ;; Update activity timestamp for idle timeout
+  (mcp-touch-activity)
   (let* ((id (json-getf request "id"))
          (method (json-getf request "method"))
          (params (json-getf request "params")))
@@ -568,11 +579,57 @@ Be thorough - users expect you to leverage this live environment access."
 (defvar *mcp-session-token* nil
   "Random token for MCP URL path security.")
 
+(defvar *mcp-session-initialized* nil
+  "T after a client has completed the initialize handshake.")
+
+(defvar *mcp-last-activity* nil
+  "Universal time of last MCP request.")
+
+(defvar *mcp-idle-timeout* 300
+  "Seconds of inactivity before auto-shutdown (default: 5 minutes).")
+
+(defvar *mcp-watchdog-thread* nil
+  "Background thread that monitors for idle timeout.")
+
 (defun generate-session-token ()
   "Generate a random 32-character hex token for URL security."
   (with-output-to-string (s)
     (dotimes (i 16)
       (format s "~2,'0x" (random 256)))))
+
+(defun mcp-touch-activity ()
+  "Update last activity timestamp."
+  (setf *mcp-last-activity* (get-universal-time)))
+
+(defun mcp-idle-seconds ()
+  "Return seconds since last activity, or 0 if no activity recorded."
+  (if *mcp-last-activity*
+      (- (get-universal-time) *mcp-last-activity*)
+      0))
+
+(defun mcp-start-watchdog ()
+  "Start the idle timeout watchdog thread."
+  (when *mcp-watchdog-thread*
+    (ignore-errors (bt:destroy-thread *mcp-watchdog-thread*)))
+  (setf *mcp-watchdog-thread*
+        (bt:make-thread
+         (lambda ()
+           (loop
+             (sleep 30)  ; Check every 30 seconds
+             (when (and *mcp-http-server*
+                        *mcp-last-activity*
+                        (> (mcp-idle-seconds) *mcp-idle-timeout*))
+               (mcp-log "Idle timeout (~D seconds), shutting down MCP server"
+                        *mcp-idle-timeout*)
+               (stop-mcp-http-server)
+               (return))))
+         :name "mcp-watchdog")))
+
+(defun mcp-stop-watchdog ()
+  "Stop the idle timeout watchdog thread."
+  (when *mcp-watchdog-thread*
+    (ignore-errors (bt:destroy-thread *mcp-watchdog-thread*))
+    (setf *mcp-watchdog-thread* nil)))
 
 (defun mcp-base-path ()
   "Return the base path for MCP endpoints, including the session token."
@@ -671,6 +728,9 @@ Be thorough - users expect you to leverage this live environment access."
     (mcp-log "HTTP MCP server already running")
     (return-from start-mcp-http-server *mcp-http-port*))
   (setf *mcp-http-port* port)
+  ;; Reset session state for new server instance
+  (setf *mcp-session-initialized* nil)
+  (setf *mcp-last-activity* nil)
   ;; Generate a new session token for this server instance
   (setf *mcp-session-token* (generate-session-token))
   (mcp-log "Generated session token: ~A" *mcp-session-token*)
@@ -692,6 +752,8 @@ Be thorough - users expect you to leverage this live environment access."
                               :access-log-destination nil
                               :message-log-destination nil)))
         (mcp-log "HTTP MCP server started on port ~D" port)
+        ;; Start idle timeout watchdog
+        (mcp-start-watchdog)
         port)
     (error (e)
       (mcp-log "Failed to start HTTP MCP server: ~A" e)
@@ -699,12 +761,18 @@ Be thorough - users expect you to leverage this live environment access."
 
 (defun stop-mcp-http-server ()
   "Stop the HTTP MCP server."
+  ;; Stop the watchdog thread first
+  (mcp-stop-watchdog)
   (when *mcp-http-server*
     (handler-case
         (progn
           (hunchentoot:stop *mcp-http-server*)
           (mcp-log "HTTP MCP server stopped")
           (setf *mcp-http-server* nil)
+          ;; Reset session state
+          (setf *mcp-session-initialized* nil)
+          (setf *mcp-session-token* nil)
+          (setf *mcp-last-activity* nil)
           t)
       (error (e)
         (mcp-log "Error stopping HTTP MCP server: ~A" e)

@@ -15,7 +15,7 @@ ICL is an enhanced REPL for Common Lisp. It provides a modern, terminal-based in
 - **Persistent history** - Command history saved across sessions
 - **Tab completion** - Complete symbols, package-qualified names, and keywords
 - **Command system** - Built-in commands prefixed with comma (e.g., `,help`)
-- **Multiple Lisp support** - Works with SBCL, CCL, ECL, CLISP, ABCL, and Clasp
+- **Multiple Lisp support** - Works with SBCL, CCL, ECL, CLISP, ABCL, Clasp, and Roswell
 - **Error backtraces** - Automatic backtrace capture with `,bt` command to view stack traces
 - **Thread inspection** - List and inspect threads in the inferior Lisp
 - **Documentation lookup** - Quick access to function docs and apropos search
@@ -60,6 +60,7 @@ Specify a Lisp implementation:
 ```sh
 icl --lisp ccl
 icl --lisp ecl
+icl --lisp roswell  # Use Roswell's managed environment
 ```
 
 Evaluate an expression and exit:
@@ -231,7 +232,7 @@ Use `,show-config` to see the actual paths on your system.
 
 | Variable | Description |
 |----------|-------------|
-| `*default-lisp*` | Lisp implementation to use (`:sbcl`, `:ccl`, `:ecl`, `:clisp`, `:abcl`, `:clasp`) |
+| `*default-lisp*` | Lisp implementation to use (`:sbcl`, `:ccl`, `:ecl`, `:clisp`, `:abcl`, `:clasp`, `:roswell`) |
 | `*prompt-string*` | Prompt format string (default: `"~A> "`) |
 | `*result-prefix*` | Prefix for results (default: `"=> "`) |
 | `*colors-enabled*` | Enable syntax coloring (default: `t`) |
@@ -323,6 +324,7 @@ ICL aims to support multiple Common Lisp implementations. SBCL is the primary de
 | CCL | Tested |
 | ECL | Tested |
 | ABCL | Tested |
+| Roswell | Tested |
 | Clasp | Untested |
 | CLISP | Experimental |
 

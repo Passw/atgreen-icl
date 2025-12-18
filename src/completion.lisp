@@ -580,14 +580,32 @@
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
 (defun complete-symbol-via-slynk (prefix)
-  "Complete symbol PREFIX using Slynk backend."
+  "Complete symbol PREFIX using Slynk backend.
+   Also includes matching package names with ':' suffix."
   (handler-case
-      (let ((result (slynk-complete-simple prefix
-                                           :package *icl-package-name*)))
-        ;; slynk-complete-simple already extracts the completions list
-        (if (listp result)
-            result
-            nil))
+      (let ((symbol-results (slynk-complete-simple prefix
+                                                   :package *icl-package-name*))
+            (package-results (complete-package-names-for-symbol prefix)))
+        ;; Merge symbol and package completions, removing duplicates
+        (sort (remove-duplicates
+               (append (if (listp symbol-results) symbol-results nil)
+                       package-results)
+               :test #'string-equal)
+              #'string<))
+    (error () nil)))
+
+(defun complete-package-names-for-symbol (prefix)
+  "Return package names matching PREFIX with ':' appended.
+   Used to offer package name completions during symbol completion."
+  (handler-case
+      (let* ((up-prefix (string-upcase prefix))
+             (packages (slynk-list-packages))
+             (results nil))
+        (dolist (pkg packages)
+          (when (prefix-match-p up-prefix (string-upcase pkg))
+            ;; Append ":" so user can continue typing the symbol
+            (push (concatenate 'string (string-downcase pkg) ":") results)))
+        results)
     (error () nil)))
 
 (defun complete-keyword-via-slynk (prefix)

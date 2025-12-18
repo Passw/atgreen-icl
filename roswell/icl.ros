@@ -63,16 +63,32 @@ exec ros -Q -- $0 "$@"
     (and (probe-file ocicl-dir)
          (probe-file (merge-pathnames "setup.lisp" ocicl-dir)))))
 
+(defun roswell-deps-available-p ()
+  "Check if dependencies are available via Roswell/Quicklisp installation."
+  ;; If icl system can be found and its dependencies are available, we're good
+  (ignore-errors
+    (and (asdf:find-system :icl nil)
+         (asdf:find-system :clingon nil)
+         (asdf:find-system :termp nil))))
+
 (progn
   (require :asdf)
+  ;; Load Roswell's quicklisp so ASDF can find installed systems (quietly)
+  (let ((*standard-output* (make-broadcast-stream))
+        (*trace-output* (make-broadcast-stream))
+        (*debug-io* (make-two-way-stream (make-concatenated-stream)
+                                         (make-broadcast-stream))))
+    (handler-bind ((warning #'muffle-warning))
+      (ros:quicklisp)))
 
   (let ((icl-dir (find-icl-directory)))
     (unless icl-dir
       (format *error-output* "~&Error: Could not find ICL installation directory.~%")
       (uiop:quit 1))
 
-    ;; Check if ocicl deps are installed
-    (unless (check-ocicl-installed icl-dir)
+    ;; Check if ocicl deps are installed, or if Roswell/Quicklisp has the deps
+    (unless (or (check-ocicl-installed icl-dir)
+                (roswell-deps-available-p))
       (format *error-output* "~&Error: OCicl dependencies not found.~%")
       (format *error-output* "~&Please run the following commands:~%")
       (format *error-output* "~&  cd ~A~%" (namestring icl-dir))
@@ -82,12 +98,18 @@ exec ros -Q -- $0 "$@"
       (format *error-output* "~&  https://github.com/ocicl/ocicl~%")
       (uiop:quit 1))
 
-    ;; Setup paths for dependencies
-    (setup-ocicl-deps icl-dir)
+    ;; Setup paths for dependencies (if ocicl is being used)
+    (when (check-ocicl-installed icl-dir)
+      (setup-ocicl-deps icl-dir))
 
-    ;; Load ICL
+    ;; Load ICL (silencing harmless warnings and chatty messages from dependencies)
     (handler-case
-        (asdf:load-system :icl)
+        (let ((*standard-output* (make-broadcast-stream))
+              (*trace-output* (make-broadcast-stream))
+              (*debug-io* (make-two-way-stream (make-concatenated-stream)
+                                               (make-broadcast-stream))))
+          (handler-bind ((warning #'muffle-warning))
+            (asdf:load-system :icl)))
       (error (e)
         (format *error-output* "~&Error loading ICL: ~A~%" e)
         (uiop:quit 1)))))

@@ -83,6 +83,120 @@
   "If T (default), use the multiline editor when terminal supports it.
    If NIL, always use simple line-based input.")
 
+(defvar *browser-terminal-active* nil
+  "T when running the REPL against a browser-based terminal (xterm.js).")
+
+(defvar *capture-backend-output* nil
+  "When T, capture backend stdout/stderr and print through the current REPL stream.")
+
+(defvar *active-repl-output* nil
+  "Output stream for the currently active REPL, or NIL to use *standard-output*.")
+
+(defvar *active-repl-output-lock* (bt:make-lock "icl-active-repl-output"))
+
+(defun active-repl-output-stream ()
+  "Return the currently active REPL output stream."
+  (bt:with-lock-held (*active-repl-output-lock*)
+    *active-repl-output*))
+
+(defun set-active-repl-output (stream)
+  "Set STREAM as the active REPL output stream."
+  (bt:with-lock-held (*active-repl-output-lock*)
+    (setf *active-repl-output* stream)))
+
+(defun clear-active-repl-output-if (stream)
+  "Clear active output stream if it matches STREAM."
+  (bt:with-lock-held (*active-repl-output-lock*)
+    (when (eq *active-repl-output* stream)
+      (setf *active-repl-output* nil))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Session Management
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(defstruct (repl-session (:constructor %make-repl-session))
+  "Represents an ICL REPL session."
+  (id (gensym "SESSION-") :type symbol :read-only t)
+  (name "unnamed" :type string)
+  (output-stream nil :type (or null stream))
+  (input-stream nil :type (or null stream))
+  (active-p t :type boolean)
+  (created-at (get-universal-time) :type integer :read-only t)
+  ;; Per-session history (Phase 3)
+  (history nil :type list)
+  (history-index nil :type (or null integer))
+  (history-saved-buffer nil :type (or null string))
+  ;; Per-session search state (Phase 3)
+  (search-mode nil :type boolean)
+  (search-pattern "" :type string)
+  (search-matches nil :type list)
+  (search-match-index 0 :type integer)
+  (prefix-search-prefix nil :type (or null string))
+  (prefix-search-index nil :type (or null integer)))
+
+(defvar *session-registry* (make-hash-table :test 'eq)
+  "Registry of all active sessions, keyed by session ID.")
+
+(defvar *session-registry-lock* (bt:make-lock "session-registry"))
+
+(defvar *current-session* nil
+  "The session for this thread. Dynamically bound per REPL thread.")
+
+(defvar *primary-session* nil
+  "The primary session (TUI) for fallback output routing.")
+
+(defvar *evaluating-session* nil
+  "Session that initiated the current Slynk evaluation.")
+
+(defvar *evaluating-session-lock* (bt:make-lock "evaluating-session"))
+
+(defun register-session (session)
+  "Register SESSION in the global registry."
+  (bt:with-lock-held (*session-registry-lock*)
+    (setf (gethash (repl-session-id session) *session-registry*) session)
+    (unless *primary-session*
+      (setf *primary-session* session)))
+  session)
+
+(defun unregister-session (session)
+  "Remove SESSION from the global registry."
+  (bt:with-lock-held (*session-registry-lock*)
+    (remhash (repl-session-id session) *session-registry*)
+    (when (eq *primary-session* session)
+      (setf *primary-session*
+            (loop for s being the hash-values of *session-registry*
+                  when (repl-session-active-p s) return s)))))
+
+(defun make-repl-session (&key name output-stream input-stream)
+  "Create and register a new REPL session."
+  (let ((session (%make-repl-session
+                  :name (or name "unnamed")
+                  :output-stream output-stream
+                  :input-stream input-stream)))
+    (register-session session)
+    session))
+
+(defun evaluating-session-output-stream ()
+  "Return output stream for the session that initiated current evaluation.
+   Returns NIL if no session is currently evaluating, allowing callers
+   to fall back to *active-repl-output* for async output routing."
+  (bt:with-lock-held (*evaluating-session-lock*)
+    (let ((session *evaluating-session*))
+      (when (and session (repl-session-active-p session))
+        (repl-session-output-stream session)))))
+
+(defun browser-history-file ()
+  "Return the shared browser history file path."
+  (merge-pathnames "history-browser" (state-directory)))
+
+(defun session-history-file (&optional (session *current-session*))
+  "Return history file path for SESSION.
+   TUI uses main history file, browser REPLs share history-browser."
+  (if (or (null session)
+          (string= (repl-session-name session) "TUI"))
+      (history-file)
+      (browser-history-file)))
+
 (defvar *history-file* nil
   "Path to persistent command history file. Computed at runtime.")
 
@@ -204,5 +318,3 @@
   "AI CLI tool to use for ,explain command.
    Valid values: :claude, :gemini, :codex, or NIL for auto-detect.
    Auto-detection tries claude, gemini, codex in order.")
-
-

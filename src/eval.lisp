@@ -75,15 +75,31 @@
 (defun eval-and-print (input)
   "Parse, evaluate, and print results from INPUT string.
    Handles all errors gracefully. Uses Slynk backend for evaluation."
-  ;; Try to read form locally for hooks/history, but don't fail if it doesn't work
-  ;; (e.g., if the form uses packages only defined in the backend)
-  (let ((form (ignore-errors (read-form input))))
+  ;; Track which session is evaluating for output routing
+  (bt:with-lock-held (*evaluating-session-lock*)
+    (setf *evaluating-session* *current-session*))
+  ;; Keep backward compat for old mechanism
+  (set-active-repl-output *standard-output*)
+  (unwind-protect
+       ;; Try to read form locally for hooks/history, but don't fail if it doesn't work
+       ;; (e.g., if the form uses packages only defined in the backend)
+       (let ((form (ignore-errors (read-form input))))
     (when form
       ;; Update input history BEFORE evaluation so it's captured even on error
       (update-input-history form)
       (run-before-eval-hooks form))
     (handler-case
-        (let ((result (backend-eval input)))
+        (let ((result nil)
+              (captured-output nil))
+          (if *capture-backend-output*
+              (multiple-value-setq (captured-output result)
+                (backend-eval-capture input))
+              (setf result (backend-eval input)))
+          (when (and *capture-backend-output*
+                     captured-output
+                     (not (string= captured-output "")))
+            (write-string captured-output *standard-output*)
+            (force-output *standard-output*))
           ;; Update result history/hooks with best-effort values
           (let ((values (cond
                           ((listp result) result)
@@ -141,4 +157,9 @@
           (format *error-output* "~&~A~%" (colorize "  Use ,bt for backtrace" *color-dim*)))
         ;; Optionally invoke error hook
         (when *error-hook*
-          (funcall *error-hook* e))))))
+          (funcall *error-hook* e)))))
+    ;; Note: We intentionally do NOT clear *evaluating-session* here.
+    ;; Backend output can arrive asynchronously after backend-eval returns.
+    ;; Keeping *evaluating-session* set ensures delayed output goes to the
+    ;; correct session. It will be updated when a new evaluation starts.
+    ))

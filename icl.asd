@@ -21,10 +21,14 @@
                :split-sequence
                ;; JSON for MCP protocol
                :yason
+               :com.inuoe.jzon
                ;; Markdown rendering for AI output
                :tuition
-               ;; HTTP server for MCP
+               ;; HTTP server for MCP and browser
                :hunchentoot
+               ;; WebSocket support for browser
+               :hunchensocket
+               :chanl
                ;; POSIX-only dependencies
                (:feature (:not :windows) :osicat))
   :serial t
@@ -51,6 +55,7 @@
                   ((:file "registry")
                    (:file "core")))
                  (:file "mcp-server")
+                 (:file "browser")
                  (:file "repl")
                  (:file "main"))))
   :build-operation "program-op"

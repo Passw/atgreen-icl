@@ -129,17 +129,28 @@ First string in BODY is documentation."
 
 (defun handle-command (input)
   "Parse and dispatch a command from INPUT (including leading comma)."
-  (let* ((line (string-trim '(#\Space #\Tab) (subseq input 1))) ; Remove leading comma
-         (parts (split-command-line line))
-         (cmd-name (first parts))
-         (args (rest parts)))
-    (if (zerop (length cmd-name))
-        (format t "~&Type ,help for available commands.~%")
-        (let ((cmd (find-command cmd-name)))
-          (if cmd
-              (handler-case
-                  (apply (command-function cmd) args)
-                (error (e)
-                  (format *error-output* "~&Command error: ~A~%" e)))
-              (format *error-output* "~&Unknown command: ,~A~%Type ,help for available commands.~%"
-                      cmd-name))))))
+  ;; Track which session is evaluating for output routing
+  (bt:with-lock-held (*evaluating-session-lock*)
+    (setf *evaluating-session* *current-session*))
+  ;; Keep backward compat for old mechanism
+  (set-active-repl-output *standard-output*)
+  (unwind-protect
+       (let* ((line (string-trim '(#\Space #\Tab) (subseq input 1))) ; Remove leading comma
+              (parts (split-command-line line))
+              (cmd-name (first parts))
+              (args (rest parts)))
+         (if (zerop (length cmd-name))
+             (format t "~&Type ,help for available commands.~%")
+             (let ((cmd (find-command cmd-name)))
+               (if cmd
+                   (handler-case
+                       (apply (command-function cmd) args)
+                     (error (e)
+                       (format *error-output* "~&Command error: ~A~%" e)))
+                   (format *error-output* "~&Unknown command: ,~A~%Type ,help for available commands.~%"
+                           cmd-name)))))
+    ;; Note: We intentionally do NOT clear *evaluating-session* here.
+    ;; Backend output can arrive asynchronously after the command returns.
+    ;; Keeping *evaluating-session* set ensures delayed output goes to the
+    ;; correct session. It will be updated when a new evaluation starts.
+    ))

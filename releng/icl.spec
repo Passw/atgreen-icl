@@ -55,6 +55,12 @@ cp -r ocicl/sly-*/* %{buildroot}%{_datadir}/icl/sly/
 mkdir -p %{buildroot}%{_datadir}/icl/asdf
 cp 3rd-party/asdf/asdf.lisp %{buildroot}%{_datadir}/icl/asdf/
 
+# Install browser assets (JS, CSS for offline use)
+mkdir -p %{buildroot}%{_datadir}/icl/assets
+install -m 0644 assets/*.js %{buildroot}%{_datadir}/icl/assets/
+install -m 0644 assets/*.css %{buildroot}%{_datadir}/icl/assets/
+install -m 0644 assets/WEB-LICENSES %{buildroot}%{_datadir}/icl/assets/
+
 # Install collected vendored licenses
 install -D -m 0644 THIRD-PARTY-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{name}/THIRD-PARTY-LICENSES.txt
 
@@ -71,6 +77,7 @@ install -D -m 0644 THIRD-PARTY-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{n
 %{_datadir}/licenses/%{name}/THIRD-PARTY-LICENSES.txt
 %{_datadir}/icl/sly
 %{_datadir}/icl/asdf
+%{_datadir}/icl/assets
 %{_libdir}/icl
 %{_bindir}/icl
 

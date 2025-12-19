@@ -68,6 +68,22 @@
 (defvar *last-error-condition* nil
   "Condition string from the last error.")
 
+(defun write-slynk-string-to-active-repl (string)
+  "Write STRING to the session that initiated the current evaluation."
+  (let* ((eval-out (evaluating-session-output-stream))
+         (active-out (active-repl-output-stream))
+         (out (or eval-out active-out)))
+    (if out
+        (progn
+          (write-string string out)
+          (finish-output out))
+        (progn
+          ;; Fallback to standard output (usually TUI)
+          (write-string string)
+          (finish-output)))))
+
+(setf slynk-client:*write-string-hook* #'write-slynk-string-to-active-repl)
+
 (defun slynk-eval-form (string &key (package "CL-USER"))
   "Evaluate STRING and return result values.
    Output is captured and printed before results.
@@ -107,27 +123,71 @@
         (let ((result (slynk-client:slime-eval
                        `(cl:eval (cl:read-from-string ,wrapper-code))
                        *slynk-connection*)))
-          (case (first result)
-            (:ok
-             (setf *last-error-backtrace* nil
-                   *last-error-condition* nil
-                   *last-was-error* nil)
-             ;; Print captured output first
-             (let ((output (second result))
-                   (vals (third result)))
+          (cond
+            ;; Unexpected non-list result: treat as plain output with no values.
+            ((not (consp result))
+             (let ((output (princ-to-string result)))
                (when (and output (> (length output) 0))
                  (write-string output)
                  (force-output))
-               vals))
-            (:error
-             (setf *last-error-condition* (second result)
-                   *last-error-backtrace* (third result)
-                   *last-was-error* t)
-             (error "~A" (second result)))
-            (otherwise result)))
+               nil))
+            (t
+             (case (first result)
+               (:ok
+                (setf *last-error-backtrace* nil
+                      *last-error-condition* nil
+                      *last-was-error* nil)
+                ;; Print captured output first
+                (let ((output (second result))
+                      (vals (third result)))
+                  (when (and output (> (length output) 0))
+                    (write-string output)
+                    (force-output))
+                  vals))
+               (:error
+                (setf *last-error-condition* (second result)
+                      *last-error-backtrace* (third result)
+                      *last-was-error* t)
+                (error "~A" (second result)))
+               (otherwise result)))))
       (slynk-client:slime-network-error (e)
         (setf *slynk-connected-p* nil)
-        (error "Backend connection lost: ~A" e)))))
+      (error "Backend connection lost: ~A" e)))))
+
+(defun slynk-eval-form-capturing (string &key (package "CL-USER"))
+  "Evaluate STRING but keep all stdout/stderr in a string.
+Returns (values output-string value-strings). Does not print to the local REPL."
+  (declare (ignore package))
+  (unless *slynk-connected-p*
+    (error "Not connected to backend server"))
+  (let* ((wrapper-code (format nil "(handler-case
+  (with-output-to-string (out)
+    (let* ((*standard-output* out)
+           (*error-output* out)
+           (*trace-output* out)
+           (*debug-io* out)
+           (*terminal-io* (make-two-way-stream (make-string-input-stream \"\") out))
+           (*query-io* *terminal-io*))
+      (let ((vals (multiple-value-list (eval (read-from-string ~S)))))
+        (setf *** ** ** * * (first vals))
+        (force-output)
+        (list :ok out (mapcar (lambda (v) (write-to-string v :readably nil :pretty nil)) vals)))))
+  (error (err)
+    (list :error (princ-to-string err) nil)))" string))
+         (result (slynk-client:slime-eval
+                  `(cl:eval (cl:read-from-string ,wrapper-code))
+                  *slynk-connection*)))
+    (cond
+      ((not (consp result))
+       (values (princ-to-string result) nil))
+      (t
+       (case (first result)
+         (:ok
+          (values (second result) (third result)))
+         (:error
+          (error "~A" (second result)))
+         (otherwise
+          (error "Unexpected slynk response: ~A" result)))))))
 
 (defun slynk-complete-simple (prefix &key (package "CL-USER"))
   "Get simple completions for PREFIX.

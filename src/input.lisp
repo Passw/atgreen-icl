@@ -12,8 +12,9 @@
 
 (defun terminal-capable-p ()
   "Check if we have a capable terminal for advanced input."
-  (and (termp:termp)
-       (not (string= (uiop:getenv "TERM") "dumb"))))
+  (or *browser-terminal-active*
+      (and (termp:termp)
+           (not (string= (uiop:getenv "TERM") "dumb")))))
 
 (defun select-input-backend ()
   "Select appropriate input backend based on terminal capabilities.

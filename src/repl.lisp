@@ -13,14 +13,49 @@
 (defun run-repl (&key (banner t))
   "Main REPL entry point.
    If BANNER is T, print startup banner."
-  (let ((*in-repl* t)
-        (*input-count* 0))
-    (when banner
-      (print-banner))
-    (repl-loop)))
+  ;; Create TUI session for output routing
+  (let* ((session (make-repl-session
+                   :name "TUI"
+                   :output-stream *standard-output*
+                   :input-stream *standard-input*))
+         (*current-session* session)
+         (*in-repl* t)
+         (*input-count* 0))
+    ;; TUI is always the primary session
+    (setf *primary-session* session)
+    ;; Load history into this session
+    (load-history session)
+    (unwind-protect
+         (progn
+           (when banner
+             (print-banner))
+           (repl-loop session))
+      ;; Cleanup session on exit
+      (setf (repl-session-active-p session) nil)
+      (unregister-session session))))
 
-(defun repl-loop ()
-  "Main REPL loop with restart handling."
+(defun cleanup-on-exit (session)
+  "Clean up resources when exiting the REPL.
+   Suppresses thread-related errors that can occur during Hunchentoot shutdown."
+  ;; Save session history first (before any potential errors)
+  (ignore-errors (save-history session))
+  ;; Stop browser if running
+  (ignore-errors (stop-browser))
+  ;; Brief pause to let any pending I/O complete
+  (sleep 0.1)
+  ;; Stop HTTP MCP server if running
+  (ignore-errors (stop-mcp-http-server))
+  ;; Stop inferior Lisp if running
+  (when (inferior-lisp-alive-p)
+    (ignore-errors (stop-inferior-lisp)))
+  ;; Redirect error output to suppress thread cleanup errors from Clack/Hunchentoot
+  ;; that occur when SBCL terminates threads during process exit.
+  ;; This is a workaround for: https://github.com/edicl/hunchentoot/issues/131
+  #+sbcl
+  (setf sb-sys:*stderr* (make-broadcast-stream)))
+
+(defun repl-loop (&optional (session *current-session*))
+  "Main REPL loop with restart handling for SESSION."
   (unwind-protect
        (loop
          (restart-case
@@ -33,12 +68,7 @@
              (format t "~&; Goodbye~%")
              (return-from repl-loop))))
     ;; Cleanup on exit
-    (save-history)
-    ;; Stop HTTP MCP server if running
-    (stop-mcp-http-server)
-    ;; Stop inferior Lisp if running
-    (when (inferior-lisp-alive-p)
-      (stop-inferior-lisp))))
+    (cleanup-on-exit session)))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Single REPL Iteration
@@ -94,9 +124,8 @@
    BANNER: if T, print startup banner"
   ;; Detect terminal background and set up colors
   (setup-highlight-colors)
-  ;; Load persistent history
-  (load-history)
   ;; Load user config
   (when load-config
     (load-user-config))
+  ;; Note: History is loaded inside run-repl after session is created
   (run-repl :banner banner))

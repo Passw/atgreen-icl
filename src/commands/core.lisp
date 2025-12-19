@@ -1677,3 +1677,56 @@ Example: ,ai-cli          - Show current setting and available CLIs
           (format t "  ~(~A~): ~A~%"
                   cli
                   (if (ai-cli-available-p cli) "installed" "not found"))))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; System Browser
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(define-command (browse) (&optional action)
+  "Open the System Browser for exploring packages, classes, and methods.
+A VS Code-style browser with dockable panels for navigating the Lisp environment.
+Example: ,browse           - Start browser and open in web browser
+         ,browse stop      - Stop the browser server
+         ,browse test      - Run browser self-test (for CI)"
+  (cond
+    ((and action (string-equal action "stop"))
+     (if *browser-acceptor*
+         (progn
+           (stop-browser)
+           (format t "~&Browser stopped.~%"))
+         (format t "~&Browser is not running.~%")))
+    ((and action (string-equal action "test"))
+     ;; Self-test mode for CI
+     (handler-case
+         (let ((url (start-browser :open-browser nil)))
+           (format t "~&Browser started at ~A~%" url)
+           (sleep 1)
+           (let ((result (ignore-errors
+                           (uiop:run-program (list "curl" "-s" url)
+                                             :output :string))))
+             (cond
+               ((null result)
+                (format *error-output* "~&FAIL: Could not fetch page~%")
+                (stop-browser)
+                (values))
+               ((not (search "dockview" result))
+                (format *error-output* "~&FAIL: dockview not found in response~%")
+                (stop-browser)
+                (values))
+               ((not (search "xterm" result))
+                (format *error-output* "~&FAIL: xterm not found in response~%")
+                (stop-browser)
+                (values))
+               (t
+                (format t "~&Browser test passed!~%")
+                (stop-browser)
+                t))))
+       (error (e)
+         (format *error-output* "~&FAIL: ~A~%" e)
+         (ignore-errors (stop-browser)))))
+    (t
+     (handler-case
+         (let ((url (start-browser :open-browser t)))
+           (format t "~&Browser started at ~A~%" url))
+       (error (e)
+         (format *error-output* "~&Failed to start browser: ~A~%" e))))))

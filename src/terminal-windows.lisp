@@ -125,6 +125,12 @@
 (defun enter-raw-mode ()
   "Put console into raw mode for character-by-character input.
    Enables virtual terminal processing for ANSI escape sequences."
+  (when *browser-terminal-active*
+    (setf *terminal-raw-p* t)
+    ;; Enable bracketed paste mode for xterm.js
+    (format t "~C[?2004h" +esc+)
+    (force-output)
+    (return-from enter-raw-mode t))
   (when *terminal-raw-p*
     (return-from enter-raw-mode t))
   (unless (console-p)
@@ -161,6 +167,12 @@
 
 (defun exit-raw-mode ()
   "Restore console to original settings."
+  (when *browser-terminal-active*
+    (when *terminal-raw-p*
+      (format t "~C[?2004l" +esc+)
+      (force-output))
+    (setf *terminal-raw-p* nil)
+    (return-from exit-raw-mode t))
   (when (and *terminal-raw-p* *saved-input-mode*)
     (handler-case
         (progn

@@ -63,4 +63,9 @@
    #:slynk-connect
    #:slynk-disconnect
    #:start-inferior-lisp
-   #:stop-inferior-lisp))
+   #:stop-inferior-lisp
+
+   ;; Browser
+   #:start-browser
+   #:stop-browser
+   #:*browser-port*))

@@ -232,6 +232,15 @@
     (when auth (setf (symbol-function auth) (lambda (stream) (declare (ignore stream)) nil))))
   (let ((x (find-symbol \"*TRANSLATING-SWANK-TO-SLYNK*\" :slynk-rpc)))
     (when x (setf (symbol-value x) nil)))
+  ;; Configure worker thread bindings so *debug-io* output goes through stdout
+  ;; instead of directly to the terminal. This allows ICL to capture all output.
+  (let ((bindings-var (find-symbol \"*DEFAULT-WORKER-THREAD-BINDINGS*\" :slynk)))
+    (when bindings-var
+      (let ((io (make-two-way-stream *standard-input* *standard-output*)))
+        (setf (symbol-value bindings-var)
+              (list (cons '*debug-io* io)
+                    (cons '*query-io* io)
+                    (cons '*terminal-io* io))))))
   ;; Suppress Slynk startup message
   (let ((*standard-output* (make-broadcast-stream)))
     (funcall (read-from-string \"slynk:create-server\")
@@ -254,6 +263,14 @@
               (*standard-output* (make-broadcast-stream)))
           (handler-bind ((warning #'muffle-warning))
             (funcall (read-from-string \"ql:quickload\") :slynk :silent t)))
+        ;; Configure worker thread bindings so *debug-io* output goes through stdout
+        (let ((bindings-var (find-symbol \"*DEFAULT-WORKER-THREAD-BINDINGS*\" :slynk)))
+          (when bindings-var
+            (let ((io (make-two-way-stream *standard-input* *standard-output*)))
+              (setf (symbol-value bindings-var)
+                    (list (cons '*debug-io* io)
+                          (cons '*query-io* io)
+                          (cons '*terminal-io* io))))))
         ;; Suppress Slynk startup message
         (let ((*standard-output* (make-broadcast-stream)))
           (funcall (read-from-string \"slynk:create-server\")
@@ -345,10 +362,13 @@
                             (let ((char (read-char stream nil :eof)))
                               (when (eq char :eof)
                                 (return))
-                              (write-char char)
-                              ;; Flush on newlines for responsive output
-                              (when (char= char #\Newline)
-                                (force-output)))
+                              (let* ((eval-out (evaluating-session-output-stream))
+                                     (active-out (active-repl-output-stream))
+                                     (out (or eval-out active-out *standard-output*)))
+                                (write-char char out)
+                                ;; Flush on newlines for responsive output
+                                (when (char= char #\Newline)
+                                  (force-output out))))
                           (error () (return))))
                    ;; Cleanup
                    (setf *output-reader-thread* nil)))
@@ -491,6 +511,12 @@
    Output streams to terminal. Returns result values."
   (ensure-backend)
   (slynk-eval-form string))
+
+(defun backend-eval-capture (string)
+  "Evaluate STRING using the Slynk backend capturing stdout/stderr.
+Returns two values: output-string and list of result strings."
+  (ensure-backend)
+  (slynk-eval-form-capturing string))
 
 (defun backend-complete (prefix package)
   "Get completions for PREFIX in PACKAGE using Slynk backend."

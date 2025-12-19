@@ -22,6 +22,12 @@
 
 (defun enter-raw-mode ()
   "Put terminal into raw mode for character-by-character input."
+  (when *browser-terminal-active*
+    (setf *terminal-raw-p* t)
+    ;; Note: We don't send bracketed paste mode (ESC[?2004h) for browser terminals.
+    ;; xterm.js handles paste via JavaScript events, and sending escape sequences
+    ;; character-by-character through gray streams can cause display artifacts.
+    (return-from enter-raw-mode t))
   (when *terminal-raw-p*
     (return-from enter-raw-mode t))
   (when (zerop (osicat-posix:isatty 0))
@@ -56,6 +62,10 @@
 
 (defun exit-raw-mode ()
   "Restore terminal to original settings."
+  (when *browser-terminal-active*
+    ;; No cleanup needed - we didn't send bracketed paste mode for browser terminals
+    (setf *terminal-raw-p* nil)
+    (return-from exit-raw-mode t))
   (when (and *terminal-raw-p* *saved-termios*)
     ;; Disable bracketed paste mode
     (format t "~C[?2004l" +esc+)
@@ -436,6 +446,10 @@
    Environment variable ICL_BACKGROUND can override detection:
    - ICL_BACKGROUND=dark  - assume dark background
    - ICL_BACKGROUND=light - assume light background"
+  ;; For browser terminals, always return dark (the xterm.js theme uses #111).
+  ;; Don't query via OSC 11 as it won't work through gray streams.
+  (when *browser-terminal-active*
+    (return-from detect-terminal-background :dark))
   (unless *terminal-background*
     ;; Check for environment variable override first
     (let ((override (uiop:getenv "ICL_BACKGROUND")))

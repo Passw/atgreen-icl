@@ -17,33 +17,41 @@
 ;;; Persistent History
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun load-history ()
-  "Load history from history file."
-  (let ((hfile (history-file)))
+(defun load-history (&optional (session *current-session*))
+  "Load history from history file into SESSION.
+   If SESSION is nil, loads into global *editor-history* for backward compatibility."
+  (let ((hfile (session-history-file session)))
     (when (and hfile (probe-file hfile))
       (handler-case
           (with-open-file (in hfile :direction :input
-                                           :if-does-not-exist nil)
-          (when in
-            (let ((entries nil))
-              (loop for line = (read-line in nil nil)
-                    while line
-                    ;; Decode the entry (restore newlines)
-                    do (push (decode-history-entry line) entries))
-              ;; History is stored oldest-first in file, we need newest-first
-              (setf *editor-history* entries)  ; entries is already newest-first from push
-              ;; Trim to max size
-              (when (> (length *editor-history*) *history-size*)
-                (setf *editor-history*
-                      (subseq *editor-history* 0 *history-size*))))))
+                                    :if-does-not-exist nil)
+            (when in
+              (let ((entries nil))
+                (loop for line = (read-line in nil nil)
+                      while line
+                      ;; Decode the entry (restore newlines)
+                      do (push (decode-history-entry line) entries))
+                ;; History is stored oldest-first in file, we need newest-first
+                (if session
+                    (setf (repl-session-history session) entries)
+                    (setf *editor-history* entries))
+                ;; Trim to max size
+                (let ((hist (if session (repl-session-history session) *editor-history*)))
+                  (when (> (length hist) *history-size*)
+                    (let ((trimmed (subseq hist 0 *history-size*)))
+                      (if session
+                          (setf (repl-session-history session) trimmed)
+                          (setf *editor-history* trimmed))))))))
         (error (e)
           (declare (ignore e))
           nil)))))
 
-(defun save-history ()
-  "Save history to history file."
-  (let ((hfile (history-file)))
-    (when hfile
+(defun save-history (&optional (session *current-session*))
+  "Save SESSION's history to history file.
+   If SESSION is nil, saves global *editor-history* for backward compatibility."
+  (let ((hfile (session-history-file session))
+        (hist (if session (repl-session-history session) *editor-history*)))
+    (when (and hfile hist)
       (handler-case
           (ensure-directories-exist hfile)
         (error () nil))
@@ -51,13 +59,13 @@
           (with-open-file (out hfile :direction :output
                                      :if-exists :supersede
                                      :if-does-not-exist :create)
-          ;; Save newest-first (reverse to get oldest-first in file)
-          (let ((to-save (if (> (length *editor-history*) *history-size*)
-                             (subseq *editor-history* 0 *history-size*)
-                             *editor-history*)))
-            (dolist (entry (reverse to-save))
-              ;; Replace newlines with escaped version for storage
-              (write-line (encode-history-entry entry) out))))
+            ;; Save newest-first (reverse to get oldest-first in file)
+            (let ((to-save (if (> (length hist) *history-size*)
+                               (subseq hist 0 *history-size*)
+                               hist)))
+              (dolist (entry (reverse to-save))
+                ;; Replace newlines with escaped version for storage
+                (write-line (encode-history-entry entry) out))))
         (error (e)
           (declare (ignore e))
           nil)))))
@@ -227,95 +235,140 @@
 ;;; History
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun history-add (input)
-  "Add INPUT to history if non-empty and different from last entry."
-  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline) input)))
+(defun history-add (input &optional (session *current-session*))
+  "Add INPUT to SESSION's history if non-empty and different from last entry."
+  (let ((trimmed (string-trim '(#\Space #\Tab #\Newline) input))
+        (hist (if session (repl-session-history session) *editor-history*)))
     (when (and (plusp (length trimmed))
-               (or (null *editor-history*)
-                   (string/= trimmed (first *editor-history*))))
-      (push trimmed *editor-history*))))
+               (or (null hist)
+                   (string/= trimmed (first hist))))
+      (if session
+          (push trimmed (repl-session-history session))
+          (push trimmed *editor-history*)))))
 
-(defun history-previous (buf)
-  "Navigate to previous history entry."
-  (when (null *history-index*)
-    ;; Save current buffer
-    (setf *history-saved-buffer* (buffer-contents buf))
-    (setf *history-index* -1))
-  (when (< (1+ *history-index*) (length *editor-history*))
-    (incf *history-index*)
-    (let ((entry (nth *history-index* *editor-history*)))
-      (buffer-set-contents buf entry))
-    t))
+(defun history-previous (buf &optional (session *current-session*))
+  "Navigate to previous history entry in SESSION."
+  (let ((hist (if session (repl-session-history session) *editor-history*))
+        (idx (if session (repl-session-history-index session) *history-index*)))
+    (when (null idx)
+      ;; Save current buffer
+      (if session
+          (setf (repl-session-history-saved-buffer session) (buffer-contents buf)
+                (repl-session-history-index session) -1)
+          (setf *history-saved-buffer* (buffer-contents buf)
+                *history-index* -1))
+      (setf idx -1))
+    (when (< (1+ idx) (length hist))
+      (incf idx)
+      (if session
+          (setf (repl-session-history-index session) idx)
+          (setf *history-index* idx))
+      (buffer-set-contents buf (nth idx hist))
+      t)))
 
-(defun history-next (buf)
-  "Navigate to next history entry (or back to current input)."
-  (when *history-index*
-    (cond
-      ((zerop *history-index*)
-       ;; Restore original input
-       (buffer-set-contents buf *history-saved-buffer*)
-       (setf *history-index* nil
-             *history-saved-buffer* nil)
-       t)
-      (t
-       (decf *history-index*)
-       (let ((entry (nth *history-index* *editor-history*)))
-         (buffer-set-contents buf entry))
-       t))))
+(defun history-next (buf &optional (session *current-session*))
+  "Navigate to next history entry (or back to current input) in SESSION."
+  (let ((idx (if session (repl-session-history-index session) *history-index*))
+        (saved (if session (repl-session-history-saved-buffer session) *history-saved-buffer*))
+        (hist (if session (repl-session-history session) *editor-history*)))
+    (when idx
+      (cond
+        ((zerop idx)
+         ;; Restore original input
+         (buffer-set-contents buf saved)
+         (if session
+             (setf (repl-session-history-index session) nil
+                   (repl-session-history-saved-buffer session) nil)
+             (setf *history-index* nil
+                   *history-saved-buffer* nil))
+         t)
+        (t
+         (decf idx)
+         (if session
+             (setf (repl-session-history-index session) idx)
+             (setf *history-index* idx))
+         (buffer-set-contents buf (nth idx hist))
+         t)))))
 
-(defun reset-prefix-search ()
-  "Reset prefix search state."
-  (setf *prefix-search-prefix* nil
-        *prefix-search-index* nil))
+(defun reset-prefix-search (&optional (session *current-session*))
+  "Reset prefix search state for SESSION."
+  (if session
+      (setf (repl-session-prefix-search-prefix session) nil
+            (repl-session-prefix-search-index session) nil)
+      (setf *prefix-search-prefix* nil
+            *prefix-search-index* nil)))
 
-(defun history-search-backward (buf)
-  "Search backward for history entry starting with current line content.
+(defun history-search-backward (buf &optional (session *current-session*))
+  "Search backward for history entry starting with current line content in SESSION.
    On first call, saves the prefix. Subsequent calls find older matches."
-  (let ((current-content (buffer-contents buf)))
+  (let ((current-content (buffer-contents buf))
+        (hist (if session (repl-session-history session) *editor-history*))
+        (prefix-search-prefix (if session (repl-session-prefix-search-prefix session) *prefix-search-prefix*))
+        (prefix-search-index (if session (repl-session-prefix-search-index session) *prefix-search-index*))
+        (saved-buffer (if session (repl-session-history-saved-buffer session) *history-saved-buffer*)))
     ;; Initialize search on first call or if content changed
-    (when (or (null *prefix-search-prefix*)
-              (not (and *prefix-search-index*
-                        (alexandria:starts-with-subseq *prefix-search-prefix* current-content))))
+    (when (or (null prefix-search-prefix)
+              (not (and prefix-search-index
+                        (alexandria:starts-with-subseq prefix-search-prefix current-content))))
       ;; Save current buffer if starting fresh
-      (unless *history-saved-buffer*
-        (setf *history-saved-buffer* current-content))
-      (setf *prefix-search-prefix* current-content
-            *prefix-search-index* -1))
+      (unless saved-buffer
+        (if session
+            (setf (repl-session-history-saved-buffer session) current-content)
+            (setf *history-saved-buffer* current-content)))
+      (if session
+          (setf (repl-session-prefix-search-prefix session) current-content
+                (repl-session-prefix-search-index session) -1)
+          (setf *prefix-search-prefix* current-content
+                *prefix-search-index* -1))
+      (setf prefix-search-prefix current-content
+            prefix-search-index -1))
     ;; Search for next match
-    (let ((prefix (string-downcase *prefix-search-prefix*)))
-      (loop for i from (1+ *prefix-search-index*) below (length *editor-history*)
-            for entry = (nth i *editor-history*)
+    (let ((prefix (string-downcase prefix-search-prefix)))
+      (loop for i from (1+ prefix-search-index) below (length hist)
+            for entry = (nth i hist)
             when (alexandria:starts-with-subseq prefix (string-downcase entry))
-            do (setf *prefix-search-index* i)
+            do (if session
+                   (setf (repl-session-prefix-search-index session) i)
+                   (setf *prefix-search-index* i))
                (buffer-set-contents buf entry)
                (return t)
             finally (return nil)))))
 
-(defun history-search-forward (buf)
-  "Search forward for history entry starting with the prefix.
+(defun history-search-forward (buf &optional (session *current-session*))
+  "Search forward for history entry starting with the prefix in SESSION.
    Moves toward more recent entries."
-  (when (and *prefix-search-prefix* *prefix-search-index*)
-    (if (zerop *prefix-search-index*)
-        ;; Restore original input
-        (progn
-          (buffer-set-contents buf *history-saved-buffer*)
-          (reset-prefix-search)
-          (setf *history-saved-buffer* nil)
-          t)
-        ;; Search for previous (more recent) match
-        (let ((prefix (string-downcase *prefix-search-prefix*)))
-          (loop for i from (1- *prefix-search-index*) downto 0
-                for entry = (nth i *editor-history*)
-                when (alexandria:starts-with-subseq prefix (string-downcase entry))
-                do (setf *prefix-search-index* i)
-                   (buffer-set-contents buf entry)
-                   (return t)
-                finally
-                ;; No more matches - restore original
-                (buffer-set-contents buf *history-saved-buffer*)
-                (reset-prefix-search)
-                (setf *history-saved-buffer* nil)
-                (return t))))))
+  (let ((prefix-search-prefix (if session (repl-session-prefix-search-prefix session) *prefix-search-prefix*))
+        (prefix-search-index (if session (repl-session-prefix-search-index session) *prefix-search-index*))
+        (saved-buffer (if session (repl-session-history-saved-buffer session) *history-saved-buffer*))
+        (hist (if session (repl-session-history session) *editor-history*)))
+    (when (and prefix-search-prefix prefix-search-index)
+      (if (zerop prefix-search-index)
+          ;; Restore original input
+          (progn
+            (buffer-set-contents buf saved-buffer)
+            (reset-prefix-search session)
+            (if session
+                (setf (repl-session-history-saved-buffer session) nil)
+                (setf *history-saved-buffer* nil))
+            t)
+          ;; Search for previous (more recent) match
+          (let ((prefix (string-downcase prefix-search-prefix)))
+            (loop for i from (1- prefix-search-index) downto 0
+                  for entry = (nth i hist)
+                  when (alexandria:starts-with-subseq prefix (string-downcase entry))
+                  do (if session
+                         (setf (repl-session-prefix-search-index session) i)
+                         (setf *prefix-search-index* i))
+                     (buffer-set-contents buf entry)
+                     (return t)
+                  finally
+                  ;; No more matches - restore original
+                  (buffer-set-contents buf saved-buffer)
+                  (reset-prefix-search session)
+                  (if session
+                      (setf (repl-session-history-saved-buffer session) nil)
+                      (setf *history-saved-buffer* nil))
+                  (return t)))))))
 
 (defun buffer-set-contents (buf string)
   "Set buffer contents from STRING, splitting on newlines."
@@ -332,28 +385,37 @@
 ;;; Reverse History Search
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun search-history-for (pattern)
-  "Find all history entries containing PATTERN (case-insensitive).
-   Returns list of indices into *editor-history*."
+(defun search-history-for (pattern &optional (session *current-session*))
+  "Find all history entries containing PATTERN (case-insensitive) in SESSION.
+   Returns list of indices into session's history."
   (when (plusp (length pattern))
     (let ((pat (string-downcase pattern))
+          (hist (if session (repl-session-history session) *editor-history*))
           (matches nil))
-      (loop for entry in *editor-history*
+      (loop for entry in hist
             for i from 0
             when (search pat (string-downcase entry))
             do (push i matches))
       (nreverse matches))))
 
-(defun enter-search-mode (buf)
-  "Enter reverse-search mode."
-  (setf *search-mode* t
-        *search-pattern* ""
-        *search-match-index* 0
-        *search-matches* nil
-        *search-display-lines* 0)
+(defun enter-search-mode (buf &optional (session *current-session*))
+  "Enter reverse-search mode for SESSION."
+  (if session
+      (setf (repl-session-search-mode session) t
+            (repl-session-search-pattern session) ""
+            (repl-session-search-match-index session) 0
+            (repl-session-search-matches session) nil)
+      (setf *search-mode* t
+            *search-pattern* ""
+            *search-match-index* 0
+            *search-matches* nil))
+  (setf *search-display-lines* 0)
   ;; Save current buffer
-  (unless *history-saved-buffer*
-    (setf *history-saved-buffer* (buffer-contents buf))))
+  (let ((saved (if session (repl-session-history-saved-buffer session) *history-saved-buffer*)))
+    (unless saved
+      (if session
+          (setf (repl-session-history-saved-buffer session) (buffer-contents buf))
+          (setf *history-saved-buffer* (buffer-contents buf))))))
 
 (defun clear-search-display ()
   "Clear the search display area and move cursor to start."
@@ -366,61 +428,83 @@
   (clear-below)
   (setf *search-display-lines* 0))
 
-(defun exit-search-mode (buf accept)
-  "Exit reverse-search mode.
+(defun exit-search-mode (buf accept &optional (session *current-session*))
+  "Exit reverse-search mode for SESSION.
    If ACCEPT is T, keep the current match in buffer."
-  (when (and accept *search-matches* (< *search-match-index* (length *search-matches*)))
-    (let* ((hist-idx (nth *search-match-index* *search-matches*))
-           (entry (nth hist-idx *editor-history*)))
-      (buffer-set-contents buf entry)))
+  (let ((matches (if session (repl-session-search-matches session) *search-matches*))
+        (match-idx (if session (repl-session-search-match-index session) *search-match-index*))
+        (hist (if session (repl-session-history session) *editor-history*)))
+    (when (and accept matches (< match-idx (length matches)))
+      (let* ((hist-idx (nth match-idx matches))
+             (entry (nth hist-idx hist)))
+        (buffer-set-contents buf entry))))
   ;; Clear the search display before exiting
   (clear-search-display)
-  (setf *search-mode* nil
-        *search-pattern* ""
-        *search-match-index* 0
-        *search-matches* nil
-        *history-saved-buffer* nil))
+  (if session
+      (setf (repl-session-search-mode session) nil
+            (repl-session-search-pattern session) ""
+            (repl-session-search-match-index session) 0
+            (repl-session-search-matches session) nil
+            (repl-session-history-saved-buffer session) nil)
+      (setf *search-mode* nil
+            *search-pattern* ""
+            *search-match-index* 0
+            *search-matches* nil
+            *history-saved-buffer* nil)))
 
-(defun update-search (buf)
-  "Update search matches based on current pattern and update buffer."
-  (setf *search-matches* (search-history-for *search-pattern*)
-        *search-match-index* 0)
-  (if *search-matches*
-      (let* ((hist-idx (first *search-matches*))
-             (entry (nth hist-idx *editor-history*)))
-        (buffer-set-contents buf entry))
-      ;; No matches - restore original
-      (when *history-saved-buffer*
-        (buffer-set-contents buf *history-saved-buffer*))))
+(defun update-search (buf &optional (session *current-session*))
+  "Update search matches based on current pattern and update buffer for SESSION."
+  (let* ((pattern (if session (repl-session-search-pattern session) *search-pattern*))
+         (hist (if session (repl-session-history session) *editor-history*))
+         (saved (if session (repl-session-history-saved-buffer session) *history-saved-buffer*))
+         (matches (search-history-for pattern session)))
+    (if session
+        (setf (repl-session-search-matches session) matches
+              (repl-session-search-match-index session) 0)
+        (setf *search-matches* matches
+              *search-match-index* 0))
+    (if matches
+        (let* ((hist-idx (first matches))
+               (entry (nth hist-idx hist)))
+          (buffer-set-contents buf entry))
+        ;; No matches - restore original
+        (when saved
+          (buffer-set-contents buf saved)))))
 
-(defun search-next-match (buf)
-  "Move to next match in search results."
-  (when (and *search-matches*
-             (< (1+ *search-match-index*) (length *search-matches*)))
-    (incf *search-match-index*)
-    (let* ((hist-idx (nth *search-match-index* *search-matches*))
-           (entry (nth hist-idx *editor-history*)))
-      (buffer-set-contents buf entry))))
+(defun search-next-match (buf &optional (session *current-session*))
+  "Move to next match in search results for SESSION."
+  (let ((matches (if session (repl-session-search-matches session) *search-matches*))
+        (match-idx (if session (repl-session-search-match-index session) *search-match-index*))
+        (hist (if session (repl-session-history session) *editor-history*)))
+    (when (and matches (< (1+ match-idx) (length matches)))
+      (incf match-idx)
+      (if session
+          (setf (repl-session-search-match-index session) match-idx)
+          (setf *search-match-index* match-idx))
+      (let* ((hist-idx (nth match-idx matches))
+             (entry (nth hist-idx hist)))
+        (buffer-set-contents buf entry)))))
 
 (defvar *search-display-lines* 0
   "Number of lines used by current search display (for redrawing in place).")
 
-(defun render-search-prompt ()
+(defun render-search-prompt (&optional (session *current-session*))
   "Render just the search prompt (for initial entry into search mode)."
-  ;; Move up to clear previous display if any
-  (when (plusp *search-display-lines*)
-    (cursor-up *search-display-lines*))
-  (cursor-to-column 1)
-  (clear-line)
-  (format t "~A`~A'~A"
-          (colorize "(reverse-i-search)" *color-dim*)
-          *search-pattern*
-          (colorize "[no match]" *color-red*))
-  (clear-below)
-  (setf *search-display-lines* 0)
-  (force-output))
+  (let ((pattern (if session (repl-session-search-pattern session) *search-pattern*)))
+    ;; Move up to clear previous display if any
+    (when (plusp *search-display-lines*)
+      (cursor-up *search-display-lines*))
+    (cursor-to-column 1)
+    (clear-line)
+    (format t "~A`~A'~A"
+            (colorize "(reverse-i-search)" *color-dim*)
+            pattern
+            (colorize "[no match]" *color-red*))
+    (clear-below)
+    (setf *search-display-lines* 0)
+    (force-output)))
 
-(defun render-search-with-buffer (buf)
+(defun render-search-with-buffer (buf &optional (session *current-session*))
   "Render the search prompt and full buffer content, updating in place."
   ;; Move up to start of our display area
   (when (plusp *search-display-lines*)
@@ -429,14 +513,17 @@
 
   ;; Line 0: Search prompt
   (clear-line)
-  (let ((status (if *search-matches*
-                    (format nil "~D/~D" (1+ *search-match-index*) (length *search-matches*))
-                    "no match")))
+  (let* ((matches (if session (repl-session-search-matches session) *search-matches*))
+         (match-idx (if session (repl-session-search-match-index session) *search-match-index*))
+         (pattern (if session (repl-session-search-pattern session) *search-pattern*))
+         (status (if matches
+                     (format nil "~D/~D" (1+ match-idx) (length matches))
+                     "no match")))
     (format t "~A`~A'~A"
             (colorize "(reverse-i-search)" *color-dim*)
-            *search-pattern*
+            pattern
             (colorize (format nil "[~A]" status)
-                      (if *search-matches* *color-green* *color-red*))))
+                      (if matches *color-green* *color-red*))))
 
   ;; Buffer content with syntax highlighting
   (let* ((full-content (buffer-contents buf))
@@ -457,13 +544,13 @@
     (setf *search-display-lines* line-count))
   (force-output))
 
-(defun handle-search-key (buf key)
-  "Handle KEY in reverse-search mode.
+(defun handle-search-key (buf key &optional (session *current-session*))
+  "Handle KEY in reverse-search mode for SESSION.
    Returns :continue, :accept, :cancel, or :next."
   (cond
     ;; Ctrl-R - next match
     ((eql key :reverse-search)
-     (search-next-match buf)
+     (search-next-match buf session)
      :next)
     ;; Enter - accept and exit
     ((eql key :enter)
@@ -473,14 +560,22 @@
      :cancel)
     ;; Backspace - delete from pattern
     ((eql key :backspace)
-     (when (plusp (length *search-pattern*))
-       (setf *search-pattern* (subseq *search-pattern* 0 (1- (length *search-pattern*))))
-       (update-search buf))
+     (let ((pattern (if session (repl-session-search-pattern session) *search-pattern*)))
+       (when (plusp (length pattern))
+         (let ((new-pattern (subseq pattern 0 (1- (length pattern)))))
+           (if session
+               (setf (repl-session-search-pattern session) new-pattern)
+               (setf *search-pattern* new-pattern)))
+         (update-search buf session)))
      :continue)
     ;; Regular character - add to pattern
     ((characterp key)
-     (setf *search-pattern* (concatenate 'string *search-pattern* (string key)))
-     (update-search buf)
+     (let ((pattern (if session (repl-session-search-pattern session) *search-pattern*)))
+       (let ((new-pattern (concatenate 'string pattern (string key))))
+         (if session
+             (setf (repl-session-search-pattern session) new-pattern)
+             (setf *search-pattern* new-pattern))))
+     (update-search buf session)
      :continue)
     ;; Any other key - accept and pass through
     (t :accept-and-pass)))
@@ -602,8 +697,8 @@
 ;;; Key Handling
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun handle-key (buf key)
-  "Handle KEY input, updating BUF. Returns :done, :cancel, :continue, or :redraw."
+(defun handle-key (buf key &optional (session *current-session*))
+  "Handle KEY input, updating BUF for SESSION. Returns :done, :cancel, :continue, or :redraw."
   (cond
     ;; EOF
     ((eql key :eof)
@@ -641,7 +736,7 @@
     ((eql key :up)
      (if (zerop (edit-buffer-row buf))
          ;; At first line - try history
-         (when (history-previous buf)
+         (when (history-previous buf session)
            :redraw)
          (progn
            (buffer-move-up buf)
@@ -649,7 +744,7 @@
     ((eql key :down)
      (if (= (edit-buffer-row buf) (1- (buffer-line-count buf)))
          ;; At last line - try history forward
-         (when (history-next buf)
+         (when (history-next buf session)
            :redraw)
          (progn
            (buffer-move-down buf)
@@ -662,14 +757,14 @@
      (if (> (buffer-line-count buf) 1) :redraw :continue))
     ;; Deletion (with paredit support)
     ((eql key :backspace)
-     (reset-prefix-search)
+     (reset-prefix-search session)
      (if (if *paredit-mode*
              (paredit-backspace buf)
              (buffer-delete-char-before buf))
          :redraw
          :continue))
     ((eql key :delete)
-     (reset-prefix-search)
+     (reset-prefix-search session)
      (if (if *paredit-mode*
              (paredit-delete buf)
              (buffer-delete-char-at buf))
@@ -677,7 +772,7 @@
          :continue))
     ;; Ctrl-D: delete char at cursor, or EOF if buffer empty (Emacs behavior)
     ((eql key :ctrl-d)
-     (reset-prefix-search)
+     (reset-prefix-search session)
      (if (buffer-empty-p buf)
          :eof
          (if (if *paredit-mode*
@@ -686,7 +781,7 @@
              :redraw
              :continue)))
     ((eql key :kill-line)
-     (reset-prefix-search)
+     (reset-prefix-search session)
      (buffer-kill-line buf)
      :redraw)
     ((eql key :clear-line)
@@ -713,15 +808,15 @@
        :redraw))
     ;; Alt+P - history search backward (prefix match)
     ((and (consp key) (eql (first key) :alt) (char-equal (rest key) #\p))
-     (when (history-search-backward buf)
+     (when (history-search-backward buf session)
        :redraw))
     ;; Alt+N - history search forward (prefix match)
     ((and (consp key) (eql (first key) :alt) (char-equal (rest key) #\n))
-     (when (history-search-forward buf)
+     (when (history-search-forward buf session)
        :redraw))
     ;; Ctrl-R - enter reverse search mode
     ((eql key :reverse-search)
-     (enter-search-mode buf)
+     (enter-search-mode buf session)
      :search-mode)
     ;; Bracketed paste - insert entire string at once
     ((and (consp key) (eql (car key) :paste))
@@ -747,7 +842,7 @@
     ;; Regular character (with paredit support)
     ((characterp key)
      ;; Reset prefix search since buffer is being modified
-     (reset-prefix-search)
+     (reset-prefix-search session)
      (if (and *paredit-mode*
               (eql (paredit-handle-char buf key) :handled))
          ;; Paredit handled it
@@ -765,17 +860,23 @@
 ;;; Main Editor Loop
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun run-editor (prompt continuation-prompt)
-  "Run the multi-line editor.
+(defun run-editor (prompt continuation-prompt &optional (session *current-session*))
+  "Run the multi-line editor for SESSION.
    Returns the input string, :EOF on EOF, :CANCEL on interrupt, or :NOT-A-TTY if raw mode fails."
   (let ((buf (make-edit-buffer :prompt prompt
                                :continuation-prompt continuation-prompt)))
-    (setf *history-index* nil
-          *history-saved-buffer* nil
-          *screen-row* 0
+    ;; Reset global editor state (non-session-specific)
+    (setf *screen-row* 0
           *last-key-was-tab* nil
-          *completion-line-col* nil
-          *search-mode* nil)
+          *completion-line-col* nil)
+    ;; Reset session-local state
+    (if session
+        (setf (repl-session-history-index session) nil
+              (repl-session-history-saved-buffer session) nil
+              (repl-session-search-mode session) nil)
+        (setf *history-index* nil
+              *history-saved-buffer* nil
+              *search-mode* nil))
     (reset-completion-state)
     ;; Try to enter raw mode
     (let ((entered (enter-raw-mode)))
@@ -789,31 +890,33 @@
              ;; Main loop
              (loop
                (let ((key (read-key))
-                     (process-normal-key t))
+                     (process-normal-key t)
+                     (search-mode (if session (repl-session-search-mode session) *search-mode*)))
                  ;; Handle search mode separately
-                 (when *search-mode*
-                   (let ((search-result (handle-search-key buf key)))
+                 (when search-mode
+                   (let ((search-result (handle-search-key buf key session)))
                      (cond
                        ((eql search-result :continue)
-                        (render-search-with-buffer buf)
+                        (render-search-with-buffer buf session)
                         (setf process-normal-key nil))
                        ((eql search-result :next)
-                        (render-search-with-buffer buf)
+                        (render-search-with-buffer buf session)
                         (setf process-normal-key nil))
                        ((eql search-result :accept)
-                        (exit-search-mode buf t)
+                        (exit-search-mode buf t session)
                         (render-buffer buf)
                         (setf process-normal-key nil))
                        ((eql search-result :cancel)
                         ;; Restore original buffer
-                        (when *history-saved-buffer*
-                          (buffer-set-contents buf *history-saved-buffer*))
-                        (exit-search-mode buf nil)
+                        (let ((saved (if session (repl-session-history-saved-buffer session) *history-saved-buffer*)))
+                          (when saved
+                            (buffer-set-contents buf saved)))
+                        (exit-search-mode buf nil session)
                         (render-buffer buf)
                         (setf process-normal-key nil))
                        ((eql search-result :accept-and-pass)
                         ;; Accept current match and process key normally
-                        (exit-search-mode buf t)
+                        (exit-search-mode buf t session)
                         (render-buffer buf)
                         ;; Let key be processed below
                         (setf process-normal-key t)))))
@@ -829,15 +932,15 @@
                           (result (cond
                                     (dismissed
                                      ;; Menu was dismissed by this key - process key and force redraw
-                                     (handle-key buf key)
+                                     (handle-key buf key session)
                                      :redraw)
                                     (menu-result menu-result)
-                                    (t (handle-key buf key)))))
+                                    (t (handle-key buf key session)))))
                      ;; Handle result
                      (cond
                        ;; Search mode entered
                        ((eql result :search-mode)
-                        (render-search-prompt))
+                        (render-search-prompt session))
                        ;; Menu navigation - redraw line and menu
                        ((eql result :menu-nav)
                         (render-current-line buf)
@@ -862,7 +965,7 @@
                         (format t "~%")
                         (force-output)
                         (let ((contents (buffer-contents buf)))
-                          (history-add contents)
+                          (history-add contents session)
                           (return contents)))
                        ((eql result :eof)
                         (when (completion-menu-active-p)
@@ -900,12 +1003,12 @@
 ;;; Public Interface
 ;;; ─────────────────────────────────────────────────────────────────────────────
 
-(defun multiline-edit (&key (prompt "") (continuation-prompt ""))
-  "Read a complete Lisp form with multi-line editing.
+(defun multiline-edit (&key (prompt "") (continuation-prompt "") (session *current-session*))
+  "Read a complete Lisp form with multi-line editing for SESSION.
    Returns the input string, NIL on EOF, :CANCEL on interrupt, or :NOT-A-TTY if not a terminal."
   (if (terminal-capable-p)
       (handler-case
-          (let ((result (run-editor prompt continuation-prompt)))
+          (let ((result (run-editor prompt continuation-prompt session)))
             (case result
               (:eof nil)           ; Convert :eof to nil for consistency
               (:not-a-tty :not-a-tty)

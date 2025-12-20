@@ -136,7 +136,10 @@
              (print-values result))
             (t
              ;; Unexpected result type - print as-is
-             (format t "~A~S~%" (colorize *result-prefix* *color-prefix*) result))))
+             (format t "~A~S~%" (colorize *result-prefix* *color-prefix*) result)))
+          ;; Refresh browser package/symbol lists after successful evaluation
+          (when *browser-terminal-active*
+            (refresh-browser-lists)))
       (undefined-function (e)
         (let ((msg (format nil "Undefined function: ~A" (cell-error-name e))))
           (record-repl-interaction input msg t)

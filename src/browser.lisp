@@ -284,6 +284,14 @@
   (let ((symbols (get-package-symbols package-name)))
     (ws-send client "symbols" :package package-name :data symbols)))
 
+(defun refresh-browser-lists ()
+  "Refresh package lists for all connected browser clients.
+   Called after REPL evaluation to pick up new definitions."
+  (when (and *repl-resource* *browser-terminal-active*)
+    (ignore-errors
+      (dolist (client (hunchensocket:clients *repl-resource*))
+        (send-packages-list client)))))
+
 (defun send-symbol-info (client package-name symbol-name)
   "Send symbol info to CLIENT."
   (handler-case
@@ -629,11 +637,17 @@
           break;
         case 'packages':
           packages = msg.data || [];
-          renderPackages();
+          // Preserve current filter when re-rendering
+          renderPackages(document.getElementById('package-filter')?.value || '');
+          // Re-fetch symbols for selected package (may have new definitions)
+          if (selectedPackage) {
+            ws.send(JSON.stringify({type: 'get-symbols', package: selectedPackage}));
+          }
           break;
         case 'symbols':
           symbols = msg.data || [];
-          renderSymbols();
+          // Preserve current filter when re-rendering
+          renderSymbols(document.getElementById('symbol-filter')?.value || '');
           break;
         case 'symbol-info':
           renderSymbolInfo(msg.data);
@@ -699,6 +713,12 @@
     });
 
     function handleSymbolClicked(msg) {
+      // Clear filters when navigating via REPL symbol click
+      const pkgFilter = document.getElementById('package-filter');
+      const symFilter = document.getElementById('symbol-filter');
+      if (pkgFilter) pkgFilter.value = '';
+      if (symFilter) symFilter.value = '';
+
       // Update Packages panel - select the package
       selectedPackage = msg.package;
       renderPackages();
@@ -1045,25 +1065,71 @@
             ws.send(JSON.stringify({type: 'input', data: data}));
           });
 
-          // Click to inspect symbol - capture phase to intercept before xterm
+          // Click to inspect symbol - use click (not mousedown) to allow text selection
           // Store detected symbol from mousemove for click to use
           let hoveredSymbol = null;
+          let mouseDownPos = null;
+          let isDragging = false;
 
+          // Track mousedown position to detect drag vs click
           terminal.element.addEventListener('mousedown', (e) => {
-            // If we have a symbol under cursor from hover, update all panels
-            if (hoveredSymbol) {
-              e.preventDefault();
-              e.stopPropagation();
-              ws.send(JSON.stringify({type: 'symbol-click', symbol: hoveredSymbol}));
-              setTimeout(() => terminal.focus(), 10);
+            mouseDownPos = { x: e.clientX, y: e.clientY };
+            isDragging = false;
+          });
+
+          // Inspect on mouseup when no drag selection was made
+          terminal.element.addEventListener('mouseup', (e) => {
+            // Skip symbol inspect if a selection exists (click-drag selection)
+            if (terminal && terminal.hasSelection && terminal.hasSelection()) {
+              mouseDownPos = null;
+              return;
             }
-          }, { capture: true });
+            // Only inspect if we have a symbol and didn't drag
+            if (hoveredSymbol && mouseDownPos && !isDragging) {
+              const dx = Math.abs(e.clientX - mouseDownPos.x);
+              const dy = Math.abs(e.clientY - mouseDownPos.y);
+              // If mouse moved less than 5 pixels, treat as a click not a drag
+              if (dx < 5 && dy < 5) {
+                ws.send(JSON.stringify({type: 'symbol-click', symbol: hoveredSymbol}));
+                terminal.focus();
+              }
+            }
+            mouseDownPos = null;
+          });
+
+          // Enable right-click copy via context menu
+          terminal.attachCustomKeyEventHandler((e) => {
+            // Allow Ctrl+C to copy when there's a selection (not send SIGINT)
+            if (e.ctrlKey && e.key === 'c' && terminal.hasSelection()) {
+              return false; // Let browser handle copy
+            }
+            // Allow Ctrl+Shift+C for copy
+            if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+              return false;
+            }
+            // Allow Ctrl+Shift+V for paste
+            if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+              return false;
+            }
+            return true; // Let xterm handle other keys
+          });
 
           // Hover highlight box for symbols
           let highlightBox = null;
           const termEl = this._element;
           this._element.addEventListener('mousemove', (e) => {
             if (!terminal) return;
+            if (mouseDownPos) {
+              const dx = Math.abs(e.clientX - mouseDownPos.x);
+              const dy = Math.abs(e.clientY - mouseDownPos.y);
+              if (dx > 5 || dy > 5) {
+                isDragging = true;
+                hoveredSymbol = null;
+                if (highlightBox) highlightBox.style.display = 'none';
+                terminal.element.style.cursor = '';
+                return;
+              }
+            }
             const rect = terminal.element.getBoundingClientRect();
             const renderer = terminal._core._renderService.dimensions;
             if (!renderer.css.cell.width) return;
@@ -1327,15 +1393,26 @@
       (setf (repl-thread *repl-resource*)
             (bt:make-thread
              (lambda ()
-               (let ((*standard-input* in-stream)
-                     (*standard-output* out-stream)
-                     (*error-output* out-stream)
-                     (*trace-output* out-stream)
-                     (*terminal-io* (make-two-way-stream in-stream out-stream))
-                     (*query-io* (make-two-way-stream in-stream out-stream))
-                     (*in-repl* t)
-                     (*input-count* 0)
-                     (*browser-terminal-active* t))
+               ;; Create a browser session for history support
+               (let* ((session (make-repl-session
+                                :name "Browser"
+                                :output-stream out-stream
+                                :input-stream in-stream))
+                      (*current-session* session)
+                      (*standard-input* in-stream)
+                      (*standard-output* out-stream)
+                      (*error-output* out-stream)
+                      (*trace-output* out-stream)
+                      (*terminal-io* (make-two-way-stream in-stream out-stream))
+                      (*query-io* (make-two-way-stream in-stream out-stream))
+                      (*in-repl* t)
+                      (*input-count* 0)
+                      (*browser-terminal-active* t))
+                 ;; Load history for browser session (shares with TUI)
+                 (load-history session)
                  ;; Use the real REPL loop with full editor support
-                 (repl-loop)))
+                 (unwind-protect
+                      (repl-loop session)
+                   ;; Save history on exit
+                   (ignore-errors (save-history session)))))
              :name "browser-repl")))))

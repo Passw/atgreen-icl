@@ -1302,12 +1302,17 @@
   ;; 4. Fall back to ASDF system source (development)
   (merge-pathnames "assets/" (asdf:system-source-directory :icl)))
 
-(defvar *assets-directory* (find-assets-directory)
-  "Directory containing browser assets (JS, CSS).")
+(defvar *assets-directory* nil
+  "Directory containing browser assets (JS, CSS). Computed lazily at runtime.")
+
+(defun get-assets-directory ()
+  "Get the assets directory, computing it lazily if needed."
+  (or *assets-directory*
+      (setf *assets-directory* (find-assets-directory))))
 
 (defun serve-asset (filename)
   "Serve an asset file, returning content and setting content-type."
-  (let ((filepath (merge-pathnames filename *assets-directory*)))
+  (let ((filepath (merge-pathnames filename (get-assets-directory))))
     (when (probe-file filepath)
       (setf (hunchentoot:content-type*)
             (cond

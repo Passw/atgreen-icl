@@ -101,7 +101,7 @@ jobs:
       - name: Test basic evaluation (Linux)
         if: runner.os == 'Linux'
         run: |
-          output=$(echo '(+ 1 2)' | timeout 30s ./${{ matrix.binary }} 2>&1)
+          output=$(printf '(+ 1 2)\n,quit\n' | timeout 30s ./${{ matrix.binary }} 2>&1)
           echo "$output"
           echo "$output" | grep -q "3" || (echo "FAIL: Expected result 3 not found" && exit 1)
 
@@ -109,7 +109,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install coreutils
-          output=$(echo '(+ 1 2)' | gtimeout 30s ./${{ matrix.binary }} 2>&1)
+          output=$(printf '(+ 1 2)\n,quit\n' | gtimeout 30s ./${{ matrix.binary }} 2>&1)
           echo "$output"
           echo "$output" | grep -q "3" || (echo "FAIL: Expected result 3 not found" && exit 1)
 
@@ -121,7 +121,7 @@ jobs:
           $job = Start-Job -ScriptBlock {
             param($exe)
             $env:HOME = $env:USERPROFILE
-            "(+ 1 2)" | & $exe 2>&1
+            "(+ 1 2)`n,quit" | & $exe 2>&1
           } -ArgumentList $exePath
           $result = Wait-Job $job -Timeout 60
           if ($result) {

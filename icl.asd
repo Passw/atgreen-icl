@@ -55,6 +55,7 @@
                  (:file "output")
                  (:file "highlight")
                  (:file "eval")
+                 (:file "profiler")
                  (:module "commands"
                   :components
                   ((:file "registry")

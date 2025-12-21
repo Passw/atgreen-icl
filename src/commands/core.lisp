@@ -1099,6 +1099,44 @@ Example: ,profile-reset"
    *slynk-connection*))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Flame Graph Profiling (Speedscope)
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(define-command (flame flamegraph fg) (form-string)
+  "Profile a form and display interactive flame graph in browser.
+Opens Speedscope viewer with CPU profiling data.
+When browser mode is active, opens in a Dockview panel.
+Otherwise opens in a new browser tab.
+Example: ,flame (dotimes (i 100000) (sqrt i))
+Example: ,flamegraph (my-expensive-function)"
+  (handler-case
+      (progn
+        ;; Ensure browser server is running
+        (unless *browser-acceptor*
+          (format t "~&Starting browser server...~%")
+          (start-browser :open-browser nil))
+        (format t "~&Profiling...~%")
+        (multiple-value-bind (profile-id has-samples) (profile-and-store form-string :name form-string)
+          (if has-samples
+              ;; Check if browser has connected clients
+              (if (and *repl-resource*
+                       (hunchensocket:clients *repl-resource*))
+                  ;; Open in Dockview panel
+                  (progn
+                    (format t "~&Opening flame graph in panel...~%")
+                    (open-speedscope-panel profile-id form-string))
+                  ;; Fall back to opening a new browser tab
+                  (let ((url (format nil "http://127.0.0.1:~A/speedscope/index.html#profileURL=/profile-data/~A.json"
+                                     *browser-port* profile-id)))
+                    (format t "~&Opening flame graph: ~A~%" url)
+                    (ignore-errors (uiop:run-program (list "xdg-open" url)))))
+              ;; No samples collected
+              (format t "~&No profiling samples collected. The code may have executed too quickly.~%~
+                         Try profiling longer-running code or increasing iterations.~%"))))
+    (error (e)
+      (format *error-output* "~&Error profiling: ~A~%" e))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Stepping/Debugging Commands
 ;;; ─────────────────────────────────────────────────────────────────────────────
 

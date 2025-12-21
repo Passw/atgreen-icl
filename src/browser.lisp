@@ -358,6 +358,17 @@
       (dolist (client (hunchensocket:clients *repl-resource*))
         (send-packages-list client)))))
 
+(defun open-speedscope-panel (profile-id &optional title)
+  "Send message to browser to open a Speedscope panel for PROFILE-ID."
+  (when *repl-resource*
+    (dolist (client (hunchensocket:clients *repl-resource*))
+      (let ((obj (make-hash-table :test 'equal)))
+        (setf (gethash "type" obj) "open-speedscope")
+        (setf (gethash "profileId" obj) profile-id)
+        (when title
+          (setf (gethash "title" obj) title))
+        (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
+
 (defun send-symbol-info (client package-name symbol-name)
   "Send symbol info to CLIENT."
   (browser-log "send-symbol-info: package=~S symbol=~S" package-name symbol-name)
@@ -885,8 +896,27 @@
         case 'theme':
           applyTheme(msg.data);
           break;
+        case 'open-speedscope':
+          openSpeedscopePanel(msg.profileId, msg.title);
+          break;
       }
     };
+
+    // Open Speedscope flame graph panel
+    let speedscopeCounter = 0;
+    function openSpeedscopePanel(profileId, title) {
+      const panelId = 'speedscope-' + (++speedscopeCounter);
+      const profileUrl = '/profile-data/' + profileId + '.json';
+      if (dockviewApi) {
+        dockviewApi.addPanel({
+          id: panelId,
+          component: 'speedscope',
+          title: title || 'Flame Graph',
+          params: { profileUrl: profileUrl },
+          position: { referencePanel: 'terminal', direction: 'right' }
+        });
+      }
+    }
 
     // Theme application
     function applyTheme(themeData) {
@@ -1239,6 +1269,19 @@
       init(params) {}
     }
 
+    class SpeedscopePanel {
+      constructor() {
+        this._element = document.createElement('div');
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;';
+      }
+      get element() { return this._element; }
+      init(params) {
+        const profileUrl = params.params?.profileUrl || '';
+        const iframeSrc = '/speedscope/index.html#profileURL=' + encodeURIComponent(profileUrl);
+        this._element.innerHTML = '<iframe src=\"' + iframeSrc + '\" style=\"width:100%;height:100%;border:none;\"></iframe>';
+      }
+    }
+
     class DynamicInspectorPanel {
       constructor() {
         this._element = document.createElement('div');
@@ -1442,6 +1485,7 @@
           case 'symbols': return new SymbolsPanel();
           case 'inspector': return new InspectorPanel();
           case 'dynamic-inspector': return new DynamicInspectorPanel();
+          case 'speedscope': return new SpeedscopePanel();
           case 'terminal': return new TerminalPanel();
         }
       }
@@ -1540,6 +1584,61 @@
         (set-content-type)
         (alexandria:read-file-into-string filepath)))))
 
+(defun serve-speedscope-asset (filename)
+  "Serve a speedscope asset file."
+  (let ((key (concatenate 'string "speedscope/" filename)))
+    (flet ((set-content-type ()
+             (setf (hunchentoot:content-type*)
+                   (cond
+                     ((alexandria:ends-with-subseq ".html" filename) "text/html")
+                     ((alexandria:ends-with-subseq ".css" filename) "text/css")
+                     ((alexandria:ends-with-subseq ".js" filename) "application/javascript")
+                     ((alexandria:ends-with-subseq ".json" filename) "application/json")
+                     ((alexandria:ends-with-subseq ".png" filename) "image/png")
+                     ((alexandria:ends-with-subseq ".txt" filename) "text/plain")
+                     (t "application/octet-stream")))))
+      ;; Check text assets first
+      (let ((embedded (get-embedded-asset key)))
+        (when embedded
+          (set-content-type)
+          (return-from serve-speedscope-asset embedded)))
+      ;; Check binary assets (favicons)
+      (let ((binary (get-embedded-binary-asset key)))
+        (when binary
+          (set-content-type)
+          (return-from serve-speedscope-asset binary)))
+      ;; Fall back to filesystem (for development)
+      (let ((filepath (merge-pathnames key (get-assets-directory))))
+        (when (probe-file filepath)
+          (set-content-type)
+          (if (alexandria:ends-with-subseq ".png" filename)
+              (alexandria:read-file-into-byte-vector filepath)
+              (alexandria:read-file-into-string filepath))))
+      ;; Default index.html for root
+      (when (or (string= filename "") (string= filename "/"))
+        (setf (hunchentoot:content-type*) "text/html")
+        (or (get-embedded-asset "speedscope/index.html")
+            (let ((filepath (merge-pathnames "speedscope/index.html" (get-assets-directory))))
+              (when (probe-file filepath)
+                (alexandria:read-file-into-string filepath))))))))
+
+(defun serve-profile-data (profile-id)
+  "Serve profile data JSON for the given PROFILE-ID."
+  ;; Remove .json extension if present
+  (let ((id (if (alexandria:ends-with-subseq ".json" profile-id)
+                (subseq profile-id 0 (- (length profile-id) 5))
+                profile-id)))
+    (let ((data (get-profile id)))
+      (if data
+          (progn
+            (setf (hunchentoot:content-type*) "application/json")
+            ;; Add CORS header for speedscope
+            (setf (hunchentoot:header-out :access-control-allow-origin) "*")
+            data)
+          (progn
+            (setf (hunchentoot:return-code*) 404)
+            "Profile not found")))))
+
 (defmethod hunchentoot:acceptor-dispatch-request ((acceptor browser-acceptor) request)
   "Handle HTTP requests."
   (let ((path (hunchentoot:script-name request))
@@ -1568,6 +1667,14 @@
              (progn
                (setf (hunchentoot:return-code*) 404)
                "Asset not found"))))
+      ;; Serve speedscope files
+      ((and (> (length path) 12)
+            (string= (subseq path 0 12) "/speedscope/"))
+       (serve-speedscope-asset (subseq path 12)))
+      ;; Serve profile data
+      ((and (> (length path) 14)
+            (string= (subseq path 0 14) "/profile-data/"))
+       (serve-profile-data (subseq path 14)))
       ;; 404 for all other paths (security)
       (t
        (setf (hunchentoot:return-code*) 404)

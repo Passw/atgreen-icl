@@ -1,5 +1,9 @@
 SLYNK_DIR := $(wildcard ocicl/sly-*/slynk)
 
+.PHONY: all clean
+
+all: icl
+
 slynk.zip: $(SLYNK_DIR)/*
 	@echo "Creating slynk.zip..."
 	sbcl --non-interactive \

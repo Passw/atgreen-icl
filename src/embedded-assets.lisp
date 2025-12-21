@@ -29,6 +29,7 @@
                         "xterm.min.js"
                         "xterm.css"
                         "xterm-addon-fit.min.js"
+                        "cytoscape.min.js"
                         "WEB-LICENSES"))
       (let ((path (merge-pathnames filename assets-dir)))
         (when (probe-file path)

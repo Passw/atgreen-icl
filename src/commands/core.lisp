@@ -1131,10 +1131,73 @@ Example: ,flamegraph (my-expensive-function)"
                     (format t "~&Opening flame graph: ~A~%" url)
                     (ignore-errors (uiop:run-program (list "xdg-open" url)))))
               ;; No samples collected
-              (format t "~&No profiling samples collected. The code may have executed too quickly.~%~
-                         Try profiling longer-running code or increasing iterations.~%"))))
+              (format t "~&No profiling samples collected. The code may have executed too quickly.~%Try profiling longer-running code or increasing iterations.~%"))))
     (error (e)
       (format *error-output* "~&Error profiling: ~A~%" e))))
+
+;;; ─────────────────────────────────────────────────────────────────────────────
+;;; Data Visualization
+;;; ─────────────────────────────────────────────────────────────────────────────
+
+(define-command viz (expr-string)
+  "Visualize data in the browser based on its type.
+Evaluates the expression and displays an appropriate visualization:
+  - Symbol (class name) → class hierarchy graph with slots
+  - Hash-table → key-value table
+Requires browser mode to be active.
+Examples:
+  ,viz 'hash-table          ; class hierarchy for HASH-TABLE
+  ,viz 'standard-object     ; class hierarchy for STANDARD-OBJECT
+  ,viz *my-hash-table*      ; hash-table contents"
+  (cond
+    ((not *browser-terminal-active*)
+     (format t "~&; Browser not active. Use ,browser to start.~%"))
+    ((zerop (length (string-trim '(#\Space #\Tab) expr-string)))
+     (format t "~&; Usage: ,viz <expression>~%"))
+    (t
+     (let ((trimmed (string-trim '(#\Space #\Tab) expr-string)))
+       (handler-case
+           ;; Query backend to determine type and get visualization data
+           (let* ((query (format nil "(let ((obj ~A))
+                                        (typecase obj
+                                          (symbol
+                                           (if (find-class obj nil)
+                                               (list :class
+                                                     (symbol-name obj)
+                                                     (package-name (symbol-package obj)))
+                                               (list :symbol (princ-to-string obj))))
+                                          (hash-table
+                                           (list :hash-table
+                                                 (hash-table-count obj)
+                                                 (loop for k being the hash-keys of obj using (hash-value v)
+                                                       for i from 0 below 100
+                                                       collect (list (princ-to-string k)
+                                                                     (princ-to-string v)))))
+                                          (t (list :unknown (type-of obj) (princ-to-string obj)))))"
+                                 trimmed))
+                  (result (backend-eval query)))
+             (when (and result (listp result) (first result))
+               (let ((parsed (read-from-string (first result))))
+                 (case (first parsed)
+                   (:class
+                    (let ((sym-name (second parsed))
+                          (pkg-name (third parsed)))
+                      (open-class-graph-panel sym-name pkg-name)
+                      (format t "~&; Visualizing class hierarchy: ~A~%" sym-name)))
+                   (:hash-table
+                    (let ((count (second parsed))
+                          (entries (third parsed)))
+                      (open-hash-table-panel trimmed count entries)
+                      (format t "~&; Visualizing hash-table (~A entries)~%" count)))
+                   (:symbol
+                    (format t "~&; Symbol ~A is not a class name~%" (second parsed)))
+                   (:unknown
+                    (format t "~&; Don't know how to visualize ~A: ~A~%"
+                            (second parsed) (third parsed)))
+                   (otherwise
+                    (format t "~&; Unexpected result: ~S~%" parsed))))))
+         (error (e)
+           (format *error-output* "~&; Error: ~A~%" e)))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Stepping/Debugging Commands

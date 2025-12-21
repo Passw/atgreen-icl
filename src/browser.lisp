@@ -176,6 +176,100 @@
                      (getf (getf result :variable) :value))))
     result))
 
+(defun needs-pipe-escape-p (name)
+  "Check if symbol NAME needs pipe escaping for Common Lisp reader.
+   Pipes are needed for: slashes, spaces, parens, or lowercase letters."
+  (or (find #\/ name)
+      (find #\Space name)
+      (find #\( name)
+      (find #\) name)
+      (find #\' name)
+      (find #\" name)
+      (find #\; name)
+      (find #\| name)
+      ;; Lowercase letters require pipes (unless interned that way)
+      (some #'lower-case-p name)))
+
+(defun format-symbol-ref (package-name symbol-name)
+  "Format a qualified symbol reference for the reader.
+   Returns something like PKG::|symbol-name| or PKG::SYMBOL-NAME."
+  (if (needs-pipe-escape-p symbol-name)
+      (format nil "~A::|~A|" package-name symbol-name)
+      (format nil "~A::~A" package-name symbol-name)))
+
+(defun get-class-hierarchy (class-name package-name &key (depth 3))
+  "Get class hierarchy graph data for CLASS-NAME.
+   Returns (:nodes ((name pkg (slot-names...)) ...) :edges ((from to) ...))."
+  (let ((sym-ref (format-symbol-ref package-name class-name)))
+    (browser-log "get-class-hierarchy: class=~S pkg=~S sym-ref=~S"
+                 class-name package-name sym-ref)
+    (browser-query
+     (format nil
+             "(let ((root (find-class '~A nil)))
+                (when root
+                  (let ((nodes nil) (edges nil) (seen (make-hash-table)))
+                    (labels ((get-slot-names (class)
+                               (handler-case
+                                   (or (mapcar (lambda (slot)
+                                                 (symbol-name (sb-mop:slot-definition-name slot)))
+                                               (sb-mop:class-direct-slots class))
+                                       (list))
+                                 (error () (list))))
+                             (add-node (class)
+                               (let ((name (class-name class)))
+                                 (push (list (symbol-name name)
+                                             (package-name (symbol-package name))
+                                             (get-slot-names class))
+                                       nodes)))
+                             (walk-up (class d)
+                               (unless (or (gethash class seen) (< d 0))
+                                 (setf (gethash class seen) t)
+                                 (add-node class)
+                                 (dolist (super (sb-mop:class-direct-superclasses class))
+                                   (push (list (symbol-name (class-name super))
+                                               (symbol-name (class-name class)))
+                                         edges)
+                                   (walk-up super (1- d)))))
+                             (walk-down (class d)
+                               (unless (or (gethash class seen) (< d 0))
+                                 (setf (gethash class seen) t)
+                                 (dolist (sub (sb-mop:class-direct-subclasses class))
+                                   (add-node sub)
+                                   (push (list (symbol-name (class-name class))
+                                               (symbol-name (class-name sub)))
+                                         edges)
+                                   (walk-down sub (1- d))))))
+                      (walk-up root ~D)
+                      (setf (gethash root seen) nil)
+                      (walk-down root ~D))
+                    (list :nodes (remove-duplicates nodes :test #'equal :key #'car)
+                          :edges (remove-duplicates edges :test #'equal)))))"
+             sym-ref depth depth))))
+
+(defun get-class-children (class-name package-name)
+  "Get direct subclasses for CLASS-NAME.
+   Returns (:nodes ((name pkg) ...) :edges ((from to) ...))."
+  (let ((sym-ref (format-symbol-ref package-name class-name)))
+    (browser-log "get-class-children: class=~S pkg=~S sym-ref=~S"
+                 class-name package-name sym-ref)
+    (browser-query
+     (format nil
+             "(let ((root (find-class '~A nil)))
+                (when root
+                  (let ((nodes nil) (edges nil))
+                    (dolist (sub (sb-mop:class-direct-subclasses root))
+                      (let ((sub-name (class-name sub))
+                            (root-name (class-name root)))
+                        (push (list (symbol-name sub-name)
+                                    (package-name (symbol-package sub-name)))
+                              nodes)
+                        (push (list (symbol-name root-name)
+                                    (symbol-name sub-name))
+                              edges)))
+                    (list :nodes (remove-duplicates nodes :test #'equal)
+                          :edges (remove-duplicates edges :test #'equal)))))"
+             sym-ref))))
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WebSocket Resource
 ;;; ─────────────────────────────────────────────────────────────────────────────
@@ -298,7 +392,29 @@
           ;; Request current theme
           ((string= type "get-theme")
            (when *current-browser-theme*
-             (send-browser-theme-to-client client *current-browser-theme*))))))))
+             (send-browser-theme-to-client client *current-browser-theme*)))
+
+          ;; Request class hierarchy graph
+          ((string= type "get-class-graph")
+           (let ((class-name (gethash "className" json))
+                 (package-name (gethash "packageName" json))
+                 (panel-id (gethash "panelId" json)))
+             (when (and class-name package-name)
+               (bt:make-thread
+                (lambda ()
+                  (send-class-graph client class-name package-name panel-id))
+                :name "class-graph-handler"))))
+
+          ;; Request class graph expansion (direct subclasses)
+          ((string= type "expand-class-graph")
+           (let ((class-name (gethash "className" json))
+                 (package-name (gethash "packageName" json))
+                 (panel-id (gethash "panelId" json)))
+             (when (and class-name package-name)
+               (bt:make-thread
+                (lambda ()
+                  (send-class-graph-expand client class-name package-name panel-id))
+                :name "class-graph-expand-handler")))))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WebSocket Send Helpers
@@ -386,6 +502,69 @@
       (browser-log "send-symbol-info: ERROR ~A" e)
       (format *error-output* "~&; Error getting symbol info for ~A:~A: ~A~%"
               package-name symbol-name e))))
+
+(defun send-class-graph (client class-name package-name panel-id)
+  "Send class hierarchy graph data to CLIENT."
+  (browser-log "send-class-graph: class=~S package=~S panel-id=~S"
+               class-name package-name panel-id)
+  (handler-case
+      (let ((data (get-class-hierarchy class-name package-name)))
+        (if data
+            (ws-send client "class-graph"
+                     :panel-id panel-id
+                     :class-name class-name
+                     :nodes (getf data :nodes)
+                     :edges (getf data :edges))
+            (ws-send client "class-graph"
+                     :panel-id panel-id
+                     :error "Class not found")))
+    (error (e)
+      (browser-log "send-class-graph: ERROR ~A" e)
+      (ws-send client "class-graph"
+               :panel-id panel-id
+               :error (format nil "~A" e)))))
+
+(defun send-class-graph-expand (client class-name package-name panel-id)
+  "Send class graph expansion (direct subclasses) to CLIENT."
+  (browser-log "send-class-graph-expand: class=~S package=~S panel-id=~S"
+               class-name package-name panel-id)
+  (handler-case
+      (let ((data (get-class-children class-name package-name)))
+        (if data
+            (ws-send client "class-graph-expand"
+                     :panel-id panel-id
+                     :class-name class-name
+                     :nodes (getf data :nodes)
+                     :edges (getf data :edges))
+            (ws-send client "class-graph-expand"
+                     :panel-id panel-id
+                     :error "Class not found")))
+    (error (e)
+      (browser-log "send-class-graph-expand: ERROR ~A" e)
+      (ws-send client "class-graph-expand"
+               :panel-id panel-id
+               :error (format nil "~A" e)))))
+
+(defun open-class-graph-panel (class-name package-name)
+  "Send message to browser to open a class graph panel."
+  (when *repl-resource*
+    (dolist (client (hunchensocket:clients *repl-resource*))
+      (let ((obj (make-hash-table :test 'equal)))
+        (setf (gethash "type" obj) "open-class-graph")
+        (setf (gethash "className" obj) class-name)
+        (setf (gethash "packageName" obj) package-name)
+        (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
+
+(defun open-hash-table-panel (title count entries)
+  "Send message to browser to open a hash-table visualization panel."
+  (when *repl-resource*
+    (dolist (client (hunchensocket:clients *repl-resource*))
+      (let ((obj (make-hash-table :test 'equal)))
+        (setf (gethash "type" obj) "open-hash-table")
+        (setf (gethash "title" obj) title)
+        (setf (gethash "count" obj) count)
+        (setf (gethash "entries" obj) entries)
+        (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
 
 (defun needs-case-escape-p (str)
   "Return T if STR contains lowercase letters that would be upcased by the reader."
@@ -841,6 +1020,7 @@
   <script src='/assets/dockview.min.js'></script>
   <script src='/assets/xterm.min.js'></script>
   <script src='/assets/xterm-addon-fit.min.js'></script>
+  <script src='/assets/cytoscape.min.js'></script>
   <script>
     // WebSocket connection
     const ws = new WebSocket('ws://' + location.host + '/ws/~A');
@@ -855,6 +1035,11 @@
     let inspectorCounter = 0;
     const inspectorStates = new Map();  // panelId -> {depth, element, header}
     const pendingInspections = new Map();  // panelId -> last inspection msg
+
+    // Cytoscape class graph state management
+    let classGraphCounter = 0;
+    const cytoscapeStates = new Map();  // panelId -> CytoscapePanel instance
+    const pendingClassGraphs = new Map();  // panelId -> pending graph messages
 
     ws.onopen = () => {
       console.log('Connected');
@@ -899,6 +1084,18 @@
         case 'open-speedscope':
           openSpeedscopePanel(msg.profileId, msg.title);
           break;
+        case 'class-graph':
+          handleClassGraph(msg);
+          break;
+        case 'class-graph-expand':
+          handleClassGraphExpand(msg);
+          break;
+        case 'open-class-graph':
+          openClassGraphPanel(msg.className, msg.packageName);
+          break;
+        case 'open-hash-table':
+          openHashTablePanel(msg.title, msg.count, msg.entries);
+          break;
       }
     };
 
@@ -915,6 +1112,67 @@
           params: { profileUrl: profileUrl },
           position: { referencePanel: 'terminal', direction: 'right' }
         });
+      }
+    }
+
+    // Handle class graph data from server
+    function handleClassGraph(msg) {
+      const panelId = msg['panel-id'] || msg.panelId;
+      const panel = cytoscapeStates.get(panelId);
+      if (panel) {
+        panel.updateGraph(msg);
+      } else {
+        const pending = pendingClassGraphs.get(panelId) || [];
+        pending.push(msg);
+        pendingClassGraphs.set(panelId, pending);
+      }
+    }
+
+    function handleClassGraphExpand(msg) {
+      const panelId = msg['panel-id'] || msg.panelId;
+      const panel = cytoscapeStates.get(panelId);
+      if (panel) {
+        panel.addGraph(msg);
+      } else {
+        const pending = pendingClassGraphs.get(panelId) || [];
+        pending.push(msg);
+        pendingClassGraphs.set(panelId, pending);
+      }
+    }
+
+    // Open class graph panel
+    function openClassGraphPanel(className, packageName) {
+      console.log('openClassGraphPanel called:', className, packageName);
+      const panelId = 'classgraph-' + (++classGraphCounter);
+      if (dockviewApi) {
+        console.log('Adding panel:', panelId);
+        dockviewApi.addPanel({
+          id: panelId,
+          component: 'cytoscape',
+          title: 'Classes: ' + className,
+          params: { panelId, className, packageName },
+          position: { referencePanel: 'terminal', direction: 'right' }
+        });
+      } else {
+        console.error('dockviewApi not available');
+      }
+    }
+
+    // Open hash-table panel
+    let hashTableCounter = 0;
+    function openHashTablePanel(title, count, entries) {
+      console.log('openHashTablePanel called:', title, count, entries?.length);
+      const panelId = 'hashtable-' + (++hashTableCounter);
+      if (dockviewApi) {
+        dockviewApi.addPanel({
+          id: panelId,
+          component: 'hashtable',
+          title: title || 'Hash Table',
+          params: { panelId, count, entries },
+          position: { referencePanel: 'terminal', direction: 'right' }
+        });
+      } else {
+        console.error('dockviewApi not available');
       }
     }
 
@@ -1282,6 +1540,320 @@
       }
     }
 
+    class HashTablePanel {
+      constructor() {
+        this._element = document.createElement('div');
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);overflow:auto;padding:8px;';
+      }
+      get element() { return this._element; }
+      init(params) {
+        const count = params.params?.count || 0;
+        const entries = params.params?.entries || [];
+
+        // Build HTML table
+        let html = '<div style=\"font-family:monospace;font-size:13px;color:var(--fg-primary);\">';
+        html += '<div style=\"margin-bottom:8px;color:var(--fg-secondary);\">Hash Table (' + count + ' entries)</div>';
+        html += '<table style=\"border-collapse:collapse;width:100%;\">';
+        html += '<thead><tr style=\"background:var(--bg-tertiary);\">';
+        html += '<th style=\"text-align:left;padding:4px 8px;border:1px solid var(--border);\">Key</th>';
+        html += '<th style=\"text-align:left;padding:4px 8px;border:1px solid var(--border);\">Value</th>';
+        html += '</tr></thead><tbody>';
+
+        entries.forEach(([key, value]) => {
+          const escKey = (key || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const escValue = (value || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          html += '<tr style=\"background:var(--bg-secondary);\">';
+          html += '<td style=\"padding:4px 8px;border:1px solid var(--border);white-space:pre-wrap;\">' + escKey + '</td>';
+          html += '<td style=\"padding:4px 8px;border:1px solid var(--border);white-space:pre-wrap;\">' + escValue + '</td>';
+          html += '</tr>';
+        });
+
+        if (count > entries.length) {
+          html += '<tr style=\"background:var(--bg-secondary);color:var(--fg-secondary);\">';
+          html += '<td colspan=\"2\" style=\"padding:4px 8px;border:1px solid var(--border);text-align:center;font-style:italic;\">';
+          html += '... and ' + (count - entries.length) + ' more entries</td></tr>';
+        }
+
+        html += '</tbody></table></div>';
+        this._element.innerHTML = html;
+      }
+    }
+
+    class CytoscapePanel {
+      constructor() {
+        console.log('CytoscapePanel constructor');
+        this._element = document.createElement('div');
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);';
+        this._panelId = null;
+        this._cy = null;
+        this._className = null;
+        this._packageName = null;
+      }
+      get element() { return this._element; }
+      init(params) {
+        console.log('CytoscapePanel init:', params);
+        this._panelId = params.params?.panelId;
+        this._className = params.params?.className;
+        this._packageName = params.params?.packageName;
+
+        // Register for data updates immediately
+        cytoscapeStates.set(this._panelId, this);
+
+        // Delay Cytoscape init until element is in DOM
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            this._initCytoscape();
+          });
+        });
+      }
+
+      _initCytoscape() {
+        console.log('Initializing Cytoscape, container:', this._element, 'in DOM:', document.body.contains(this._element));
+
+        // Initialize Cytoscape
+        this._cy = cytoscape({
+          container: this._element,
+          elements: [],
+          style: [
+            {
+              selector: 'node',
+              style: {
+                'shape': 'round-rectangle',
+                'background-color': '#89b4fa',
+                'label': 'data(label)',
+                'color': '#000000',
+                'font-size': 11,
+                'text-valign': 'center',
+                'text-halign': 'center',
+                'text-wrap': 'wrap',
+                'text-max-width': 180,
+                'width': 200,
+                'padding': 8
+              }
+            },
+            {
+              selector: 'node.root',
+              style: {
+                'background-color': '#f9e2af',
+                'border-width': 2,
+                'border-color': '#fab387'
+              }
+            },
+            {
+              selector: 'edge',
+              style: {
+                'width': 2,
+                'line-color': '#6c7086',
+                'target-arrow-color': '#6c7086',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier'
+              }
+            }
+          ],
+          minZoom: 0.1,
+          maxZoom: 4
+        });
+        console.log('Cytoscape initialized:', this._cy);
+
+        // Request data if we have class info
+        if (this._className && this._packageName) {
+          ws.send(JSON.stringify({
+            type: 'get-class-graph',
+            className: this._className,
+            packageName: this._packageName,
+            panelId: this._panelId
+          }));
+        }
+
+        // Handle pending data
+        const pending = pendingClassGraphs.get(this._panelId);
+        if (pending && pending.length) {
+          pendingClassGraphs.delete(this._panelId);
+          pending.forEach((msg) => {
+            if (msg.type === 'class-graph-expand') this.addGraph(msg);
+            else this.updateGraph(msg);
+          });
+        }
+
+        // Click handler - open symbol info for clicked class
+        this._cy.on('tap', 'node', (evt) => {
+          const node = evt.target;
+          const name = node.data('label');
+          const pkg = node.data('package');
+          if (name && pkg) {
+            if (!node.data('expanded')) {
+              node.data('expanded', true);
+              ws.send(JSON.stringify({
+                type: 'expand-class-graph',
+                className: name,
+                packageName: pkg,
+                panelId: this._panelId
+              }));
+            }
+            ws.send(JSON.stringify({type: 'symbol-click', symbol: pkg + '::' + name}));
+          }
+        });
+
+        // Resize handling
+        const doResize = () => {
+          if (this._cy) {
+            this._cy.resize();
+          }
+        };
+        new ResizeObserver(doResize).observe(this._element);
+
+        // Initial resize after a moment
+        setTimeout(doResize, 50);
+      }
+
+      updateGraph(msg) {
+        console.log('updateGraph called:', msg);
+        if (!this._cy) {
+          // Cytoscape not ready yet, store for later
+          const pending = pendingClassGraphs.get(this._panelId) || [];
+          pending.push(msg);
+          pendingClassGraphs.set(this._panelId, pending);
+          return;
+        }
+        if (msg.error) {
+          this._element.innerHTML = '<div style=\"padding:20px;color:var(--fg-muted);\">Error: ' + msg.error + '</div>';
+          return;
+        }
+
+        const elements = [];
+        const rootClass = msg['class-name'] || msg.className;
+        console.log('Root class:', rootClass);
+        console.log('Nodes received:', JSON.stringify(msg.nodes));
+        console.log('Edges received:', JSON.stringify(msg.edges));
+
+        // Collect node IDs for validation
+        const nodeIds = new Set();
+
+        // Add nodes - now with slots: [name, pkg, [slot1, slot2, ...]]
+        (msg.nodes || []).forEach((nodeData) => {
+          const name = nodeData[0];
+          const pkg = nodeData[1];
+          const slots = Array.isArray(nodeData[2]) ? nodeData[2] : [];
+          nodeIds.add(name);
+
+          // Escape special characters for display
+          const escName = name.replace(/</g, '‹').replace(/>/g, '›');
+
+          // Build label with class name and slots
+          let label = escName;
+          if (slots.length > 0) {
+            // Show slots compactly below class name with separator
+            const escSlots = slots.map(s => s.replace(/</g, '‹').replace(/>/g, '›'));
+            const slotStr = escSlots.slice(0, 6).join(' ');
+            const more = slots.length > 6 ? ' …' : '';
+            label = escName + '\\n────────────────\\n' + slotStr + more;
+          }
+
+          elements.push({
+            data: {
+              id: name,
+              label: label,
+              className: name,
+              package: pkg,
+              slots: slots,
+              slotCount: slots.length,
+              expanded: false
+            },
+            classes: name === rootClass ? 'root' : ''
+          });
+        });
+
+        // Add edges (from superclass to subclass) - skip edges with missing endpoints
+        (msg.edges || []).forEach(([from, to]) => {
+          if (!nodeIds.has(from)) {
+            console.warn('Skipping edge - source not in nodes:', from);
+            return;
+          }
+          if (!nodeIds.has(to)) {
+            console.warn('Skipping edge - target not in nodes:', to);
+            return;
+          }
+          elements.push({
+            data: { id: from + '->' + to, source: from, target: to }
+          });
+        });
+
+        console.log('Total elements:', elements.length, 'nodes:', nodeIds.size);
+
+        this._cy.elements().remove();
+        this._cy.add(elements);
+
+        // Run layout
+        const roots = this._cy.nodes().filter(n => n.indegree() === 0);
+        this._cy.layout({
+          name: 'breadthfirst',
+          directed: true,
+          spacingFactor: 0.6,
+          avoidOverlap: true,
+          padding: 20,
+          nodeDimensionsIncludeLabels: true,
+          fit: true,
+          animate: false,
+          roots: (roots && roots.length) ? roots : undefined
+        }).run();
+      }
+
+      addGraph(msg) {
+        console.log('addGraph called:', msg);
+        if (!this._cy) {
+          const pending = pendingClassGraphs.get(this._panelId) || [];
+          pending.push(msg);
+          pendingClassGraphs.set(this._panelId, pending);
+          return;
+        }
+        if (msg.error) {
+          console.warn('class graph expand error:', msg.error);
+          return;
+        }
+
+        const nodeIds = new Set(this._cy.nodes().map(n => n.id()));
+        const edgeIds = new Set(this._cy.edges().map(e => e.id()));
+        let added = false;
+
+        (msg.nodes || []).forEach(([name, pkg]) => {
+          if (nodeIds.has(name)) return;
+          this._cy.add({
+            data: { id: name, label: name, package: pkg, expanded: false }
+          });
+          added = true;
+        });
+
+        (msg.edges || []).forEach(([from, to]) => {
+          const edgeId = from + '->' + to;
+          if (edgeIds.has(edgeId)) return;
+          this._cy.add({
+            data: { id: edgeId, source: from, target: to }
+          });
+          added = true;
+        });
+
+        if (added) {
+          const roots = this._cy.nodes().filter(n => n.indegree() === 0);
+          this._cy.layout({
+            name: 'breadthfirst',
+            directed: true,
+            spacingFactor: 0.6,
+            avoidOverlap: true,
+            padding: 20,
+            nodeDimensionsIncludeLabels: true,
+            fit: true,
+            animate: false,
+            roots: (roots && roots.length) ? roots : undefined
+          }).run();
+        }
+      }
+
+      dispose() {
+        if (this._panelId) cytoscapeStates.delete(this._panelId);
+        if (this._cy) this._cy.destroy();
+      }
+    }
+
     class DynamicInspectorPanel {
       constructor() {
         this._element = document.createElement('div');
@@ -1486,6 +2058,8 @@
           case 'inspector': return new InspectorPanel();
           case 'dynamic-inspector': return new DynamicInspectorPanel();
           case 'speedscope': return new SpeedscopePanel();
+          case 'hashtable': return new HashTablePanel();
+          case 'cytoscape': return new CytoscapePanel();
           case 'terminal': return new TerminalPanel();
         }
       }

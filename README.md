@@ -172,6 +172,17 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 | `,profile-stop` | Stop profiling and show results |
 | `,profile-reset` | Reset profiler data |
 
+### Browser Visualization
+
+| Command | Description |
+|---------|-------------|
+| `,browser` | Start browser-based IDE interface |
+| `,viz <expr>` | Visualize data in browser (class hierarchies, hash-tables) |
+
+The `,viz` command automatically detects the type and displays an appropriate visualization:
+- **Class names**: `'standard-object` → interactive class hierarchy graph with slots
+- **Hash-tables**: `*my-ht*` → key-value table
+
 ### Configuration
 
 | Command | Description |
@@ -188,7 +199,6 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 | `,info` | Show session information |
 | `,history` | Show value history variables |
 | `,lisp [name]` | Show or switch Lisp backend |
-| `,browse` | Open browser-based IDE interface |
 | `,clear` | Clear terminal |
 | `,quit` | Exit ICL |
 

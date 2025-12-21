@@ -117,10 +117,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $exePath = (Resolve-Path ".\${{ matrix.binary }}").Path
           $job = Start-Job -ScriptBlock {
+            param($exe)
             $env:HOME = $env:USERPROFILE
-            "(+ 1 2)" | & ".\${{ matrix.binary }}" 2>&1
-          }
+            "(+ 1 2)" | & $exe 2>&1
+          } -ArgumentList $exePath
           $result = Wait-Job $job -Timeout 60
           if ($result) {
             $output = Receive-Job $job
@@ -156,10 +158,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
+          $exePath = (Resolve-Path ".\${{ matrix.binary }}").Path
           $job = Start-Job -ScriptBlock {
+            param($exe)
             $env:HOME = $env:USERPROFILE
-            ",info`n,quit" | & ".\${{ matrix.binary }}" 2>&1
-          }
+            ",info`n,quit" | & $exe 2>&1
+          } -ArgumentList $exePath
           $result = Wait-Job $job -Timeout 60
           if ($result) {
             $output = Receive-Job $job

@@ -84,6 +84,11 @@ Skip loading config file:
 icl --no-config
 ```
 
+Start with browser interface (opens IDE alongside terminal REPL):
+```sh
+icl -b
+```
+
 ## Commands
 
 Commands are prefixed with a comma. Type `,help` for a full list.
@@ -171,6 +176,9 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 | `,profile-start` | Start ongoing profiling |
 | `,profile-stop` | Stop profiling and show results |
 | `,profile-reset` | Reset profiler data |
+| `,flame <form>` | Profile and show interactive flame graph in browser |
+
+The `,flame` command (aliases: `,flamegraph`, `,fg`) profiles the expression and opens an interactive [Speedscope](https://www.speedscope.app/) flame graph in the browser. Requires browser mode (`,browser` or `icl -b`).
 
 ### Browser Visualization
 
@@ -182,6 +190,11 @@ The interactive inspector (`,i` or `,inspect`) provides a TUI for exploring obje
 The `,viz` command automatically detects the type and displays an appropriate visualization:
 - **Class names**: `'standard-object` → interactive class hierarchy graph with slots
 - **Hash-tables**: `*my-ht*` → key-value table
+
+The class hierarchy graph supports interactive exploration:
+- **Click a node** to see available subclasses and add them one at a time
+- **Hover over a node** to highlight all ancestor classes up to the root
+- **Drag to pan**, scroll to zoom the graph
 
 ### Configuration
 
@@ -402,7 +415,7 @@ ICL operates as a frontend that communicates with a backend Lisp process via the
 └────────────────────────────────┘  └─────────────────────────────────────┘
 ```
 
-All connections use randomly-assigned ports on localhost. When ICL starts an inferior Lisp, it finds an available port and configures Slynk to listen there. The browser interface (started with `,browse`) serves a Dockview-based IDE with package browser, symbol list, and inspector panels. The MCP server (started on-demand by `,explain`) provides read-only AI tool integration.
+All connections use randomly-assigned ports on localhost. When ICL starts an inferior Lisp, it finds an available port and configures Slynk to listen there. The browser interface (started with `,browser` or `icl -b`) serves a Dockview-based IDE with package browser, symbol list, inspector panels, and class hierarchy visualization. The browser automatically closes when ICL terminates. The MCP server (started on-demand by `,explain`) provides read-only AI tool integration.
 
 ## License
 

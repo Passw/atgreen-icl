@@ -24,7 +24,10 @@ SAMPLE-INTERVAL is the sampling interval in seconds (default 0.001)."
   ;; First, ensure sb-sprof is loaded in the backend
   (backend-eval "(require 'sb-sprof)")
   ;; Now send profiling code - sb-sprof package exists so symbols can be read
-  ;; This follows cl-flamegraph's approach with proper name extraction
+  ;; This follows cl-flamegraph's approach with proper name extraction.
+  ;; We run the profiled code in a separate thread to isolate profiler signals
+  ;; from the Slynk server's socket operations (prevents SLIME-NETWORK-ERROR
+  ;; when profiling in browser mode with multiple threads).
   (let* ((profile-code
            (format nil
                    "(labels ((get-name (obj)
@@ -39,11 +42,25 @@ SAMPLE-INTERVAL is the sampling interval in seconds (default 0.001)."
                                  (get-name (slot-value obj 'sb-c::name)))
                                 (sb-kernel:code-component \"<code>\")
                                 (t (princ-to-string obj)))))
-                      (let ((result nil))
-                        (sb-sprof:with-profiling (:mode ~S
-                                                  :sample-interval ~A
-                                                  :report nil)
-                          (setf result (multiple-value-list ~A)))
+                      ;; Run profiling in a separate thread to isolate SIGPROF signals
+                      ;; from the Slynk server's socket operations
+                      (let ((result-box (list nil))
+                            (error-box (list nil)))
+                        (let ((thread (sb-thread:make-thread
+                                       (lambda ()
+                                         (handler-case
+                                             (let ((result nil))
+                                               (sb-sprof:with-profiling (:mode ~S
+                                                                         :sample-interval ~A
+                                                                         :report nil)
+                                                 (setf result (multiple-value-list ~A)))
+                                               (setf (car result-box) result))
+                                           (error (e)
+                                             (setf (car error-box) (princ-to-string e)))))
+                                       :name \"profiler-thread\")))
+                          (sb-thread:join-thread thread))
+                        (when (car error-box)
+                          (error (car error-box)))
                         ;; Build call graph (required before map-traces)
                         (sb-sprof:report :stream (make-broadcast-stream))
                         ;; Generate folded stacks like cl-flamegraph does
@@ -79,7 +96,7 @@ SAMPLE-INTERVAL is the sampling interval in seconds (default 0.001)."
                                                     (format s \"~~{~~A~~^;~~} ~~D~~%%\" new-path count)
                                                     (walk children new-path)))
                                                 node)))
-                              (walk root nil))))))"
+                              (walk root nil)))))))"
                    mode sample-interval form-string))
          (results (backend-eval profile-code)))
     (if results

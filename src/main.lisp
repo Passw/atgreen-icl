@@ -179,18 +179,14 @@
         (error (e)
           (format *error-output* "~&Error: ~A~%" e)
           (uiop:quit 1))))
-    ;; Start in browser mode or terminal REPL
-    (if browser-mode
-        ;; Browser mode - start browser interface
-        (progn
-          (format t "Starting ICL browser interface...~%")
-          (let ((url (start-browser :open-browser t)))
-            (format t "Browser started at ~A~%" url)
-            ;; Keep running until interrupted
-            (loop (sleep 1))))
-        ;; Otherwise start terminal REPL (config already loaded)
-        (start-repl :load-config nil
-                    :banner (not no-banner)))))
+    ;; Start browser if requested, then start terminal REPL
+    (when browser-mode
+      (format t "Starting ICL browser interface...~%")
+      (let ((url (start-browser :open-browser t)))
+        (format t "Browser started at ~A~%" url)))
+    ;; Start terminal REPL (config already loaded)
+    (start-repl :load-config nil
+                :banner (not no-banner))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; CLI Application

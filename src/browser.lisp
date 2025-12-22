@@ -247,8 +247,9 @@
              sym-ref depth depth))))
 
 (defun get-class-children (class-name package-name)
-  "Get direct subclasses for CLASS-NAME.
-   Returns (:nodes ((name pkg) ...) :edges ((from to) ...))."
+  "Get direct subclasses and superclasses for CLASS-NAME.
+   Returns (:nodes ((name pkg slots) ...) :edges ((from to) ...)).
+   Includes both children (for expansion) and parents (for multiple inheritance)."
   (let ((sym-ref (format-symbol-ref package-name class-name)))
     (browser-log "get-class-children: class=~S pkg=~S sym-ref=~S"
                  class-name package-name sym-ref)
@@ -256,17 +257,35 @@
      (format nil
              "(let ((root (find-class '~A nil)))
                 (when root
-                  (let ((nodes nil) (edges nil))
+                  (let ((nodes nil) (edges nil)
+                        (root-name (class-name root)))
+                    ;; Add direct subclasses
                     (dolist (sub (sb-mop:class-direct-subclasses root))
-                      (let ((sub-name (class-name sub))
-                            (root-name (class-name root)))
+                      (let ((sub-name (class-name sub)))
                         (push (list (symbol-name sub-name)
-                                    (package-name (symbol-package sub-name)))
+                                    (package-name (symbol-package sub-name))
+                                    (handler-case
+                                        (mapcar (lambda (s) (symbol-name (sb-mop:slot-definition-name s)))
+                                                (sb-mop:class-direct-slots sub))
+                                      (error () nil)))
                               nodes)
                         (push (list (symbol-name root-name)
                                     (symbol-name sub-name))
                               edges)))
-                    (list :nodes (remove-duplicates nodes :test #'equal)
+                    ;; Add direct superclasses (for multiple inheritance support)
+                    (dolist (super (sb-mop:class-direct-superclasses root))
+                      (let ((super-name (class-name super)))
+                        (push (list (symbol-name super-name)
+                                    (package-name (symbol-package super-name))
+                                    (handler-case
+                                        (mapcar (lambda (s) (symbol-name (sb-mop:slot-definition-name s)))
+                                                (sb-mop:class-direct-slots super))
+                                      (error () nil)))
+                              nodes)
+                        (push (list (symbol-name super-name)
+                                    (symbol-name root-name))
+                              edges)))
+                    (list :nodes (remove-duplicates nodes :test #'equal :key #'car)
                           :edges (remove-duplicates edges :test #'equal)))))"
              sym-ref))))
 
@@ -414,7 +433,30 @@
                (bt:make-thread
                 (lambda ()
                   (send-class-graph-expand client class-name package-name panel-id))
-                :name "class-graph-expand-handler")))))))))
+                :name "class-graph-expand-handler"))))
+
+          ;; List children names only (for selector popup)
+          ((string= type "list-class-children")
+           (let ((class-name (gethash "className" json))
+                 (package-name (gethash "packageName" json))
+                 (panel-id (gethash "panelId" json)))
+             (when (and class-name package-name)
+               (bt:make-thread
+                (lambda ()
+                  (send-class-children-list client class-name package-name panel-id))
+                :name "list-children-handler"))))
+
+          ;; Add single child to graph
+          ((string= type "add-class-child")
+           (let ((parent-name (gethash "parentName" json))
+                 (child-name (gethash "childName" json))
+                 (child-pkg (gethash "childPackage" json))
+                 (panel-id (gethash "panelId" json)))
+             (when (and parent-name child-name)
+               (bt:make-thread
+                (lambda ()
+                  (send-single-child client parent-name child-name child-pkg panel-id))
+                :name "add-child-handler")))))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WebSocket Send Helpers
@@ -541,6 +583,57 @@
                      :error "Class not found")))
     (error (e)
       (browser-log "send-class-graph-expand: ERROR ~A" e)
+      (ws-send client "class-graph-expand"
+               :panel-id panel-id
+               :error (format nil "~A" e)))))
+
+(defun send-class-children-list (client class-name package-name panel-id)
+  "Send list of direct subclass names for child selector popup."
+  (browser-log "send-class-children-list: class=~S package=~S" class-name package-name)
+  (handler-case
+      (let* ((sym-ref (format-symbol-ref package-name class-name))
+             (children (browser-query
+                        (format nil
+                                "(let ((root (find-class '~A nil)))
+                                   (when root
+                                     (mapcar (lambda (sub)
+                                               (let ((name (class-name sub)))
+                                                 (list (symbol-name name)
+                                                       (package-name (symbol-package name)))))
+                                             (sb-mop:class-direct-subclasses root))))"
+                                sym-ref))))
+        (ws-send client "class-children-list"
+                 :panel-id panel-id
+                 :parent-name class-name
+                 :parent-package package-name
+                 :children (or children nil)))
+    (error (e)
+      (browser-log "send-class-children-list: ERROR ~A" e)
+      (ws-send client "class-children-list"
+               :panel-id panel-id
+               :error (format nil "~A" e)))))
+
+(defun send-single-child (client parent-name child-name child-pkg panel-id)
+  "Send a single child node and edge to the graph."
+  (browser-log "send-single-child: parent=~S child=~S pkg=~S" parent-name child-name child-pkg)
+  (handler-case
+      (let* ((sym-ref (format-symbol-ref child-pkg child-name))
+             (slots (browser-query
+                     (format nil
+                             "(let ((class (find-class '~A nil)))
+                                (when class
+                                  (handler-case
+                                      (mapcar (lambda (s) (symbol-name (sb-mop:slot-definition-name s)))
+                                              (sb-mop:class-direct-slots class))
+                                    (error () nil))))"
+                             sym-ref))))
+        (ws-send client "class-graph-expand"
+                 :panel-id panel-id
+                 :class-name child-name
+                 :nodes (list (list child-name child-pkg (or slots nil)))
+                 :edges (list (list parent-name child-name))))
+    (error (e)
+      (browser-log "send-single-child: ERROR ~A" e)
       (ws-send client "class-graph-expand"
                :panel-id panel-id
                :error (format nil "~A" e)))))
@@ -999,7 +1092,11 @@
     .terminal-container { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
     .terminal-container .xterm { height: 100%%; width: 100%%; }
     .terminal-container .xterm-screen { height: 100%%; }
-    .terminal-container .xterm-viewport { height: 100%%; overflow-y: auto !important; }
+    .terminal-container .xterm-viewport { height: 100%%; overflow-y: auto !important; scrollbar-width: thin; scrollbar-color: var(--bg-tertiary) var(--bg-primary); }
+    .terminal-container .xterm-viewport::-webkit-scrollbar { width: 10px; }
+    .terminal-container .xterm-viewport::-webkit-scrollbar-track { background: var(--bg-primary); }
+    .terminal-container .xterm-viewport::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+    .terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); }
     .dv-content-container { position: relative; height: 100%%; }
     .dv-content-container > .panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
     .detail-content { padding: 8px; white-space: pre-wrap; font-family: 'JetBrains Mono', monospace; }
@@ -1020,11 +1117,12 @@
   <script src='/assets/dockview.min.js'></script>
   <script src='/assets/xterm.min.js'></script>
   <script src='/assets/xterm-addon-fit.min.js'></script>
-  <script src='/assets/cytoscape.min.js'></script>
+  <script src='/assets/viz-standalone.js'></script>
   <script>
     // WebSocket connection
     const ws = new WebSocket('ws://' + location.host + '/ws/~A');
     let terminal, fitAddon;
+    let pendingTheme = null;  // Store theme if received before terminal is ready
     let selectedPackage = null;
     let selectedSymbol = null;
     let packages = [];
@@ -1036,9 +1134,9 @@
     const inspectorStates = new Map();  // panelId -> {depth, element, header}
     const pendingInspections = new Map();  // panelId -> last inspection msg
 
-    // Cytoscape class graph state management
+    // Graphviz class graph state management
     let classGraphCounter = 0;
-    const cytoscapeStates = new Map();  // panelId -> CytoscapePanel instance
+    const graphvizStates = new Map();  // panelId -> GraphvizPanel instance
     const pendingClassGraphs = new Map();  // panelId -> pending graph messages
 
     ws.onopen = () => {
@@ -1090,6 +1188,9 @@
         case 'class-graph-expand':
           handleClassGraphExpand(msg);
           break;
+        case 'class-children-list':
+          handleClassChildrenList(msg);
+          break;
         case 'open-class-graph':
           openClassGraphPanel(msg.className, msg.packageName);
           break;
@@ -1118,7 +1219,7 @@
     // Handle class graph data from server
     function handleClassGraph(msg) {
       const panelId = msg['panel-id'] || msg.panelId;
-      const panel = cytoscapeStates.get(panelId);
+      const panel = graphvizStates.get(panelId);
       if (panel) {
         panel.updateGraph(msg);
       } else {
@@ -1130,13 +1231,21 @@
 
     function handleClassGraphExpand(msg) {
       const panelId = msg['panel-id'] || msg.panelId;
-      const panel = cytoscapeStates.get(panelId);
+      const panel = graphvizStates.get(panelId);
       if (panel) {
         panel.addGraph(msg);
       } else {
         const pending = pendingClassGraphs.get(panelId) || [];
         pending.push(msg);
         pendingClassGraphs.set(panelId, pending);
+      }
+    }
+
+    function handleClassChildrenList(msg) {
+      const panelId = msg['panel-id'] || msg.panelId;
+      const panel = graphvizStates.get(panelId);
+      if (panel) {
+        panel.showChildSelector(msg);
       }
     }
 
@@ -1148,7 +1257,7 @@
         console.log('Adding panel:', panelId);
         dockviewApi.addPanel({
           id: panelId,
-          component: 'cytoscape',
+          component: 'graphviz',
           title: 'Classes: ' + className,
           params: { panelId, className, packageName },
           position: { referencePanel: 'terminal', direction: 'right' }
@@ -1194,13 +1303,18 @@
       document.body.style.background = 'var(--bg-primary)';
       document.body.style.color = 'var(--fg-primary)';
 
-      // Apply xterm.js theme if terminal exists
-      if (terminal && themeData.xterm) {
-        const xtermTheme = {};
-        Object.entries(themeData.xterm).forEach(([k, v]) => {
-          xtermTheme[k] = v;
-        });
-        terminal.options.theme = xtermTheme;
+      // Apply xterm.js theme if terminal exists, otherwise store for later
+      if (themeData.xterm) {
+        if (terminal) {
+          const xtermTheme = {};
+          Object.entries(themeData.xterm).forEach(([k, v]) => {
+            xtermTheme[k] = v;
+          });
+          terminal.options.theme = xtermTheme;
+        } else {
+          // Terminal not ready yet, store theme for when it's created
+          pendingTheme = themeData;
+        }
       }
 
       // Apply dockview theme class
@@ -1208,6 +1322,13 @@
         const container = document.getElementById('layout-container');
         container.className = themeData.dockviewTheme;
       }
+
+      // Re-render all graphviz panels to apply new theme colors
+      graphvizStates.forEach((panel) => {
+        if (panel._nodes && panel._nodes.size > 0) {
+          panel._render();
+        }
+      });
     }
 
     // Send dark mode preference on connect
@@ -1579,81 +1700,132 @@
       }
     }
 
-    class CytoscapePanel {
+    class GraphvizPanel {
       constructor() {
-        console.log('CytoscapePanel constructor');
+        console.log('GraphvizPanel constructor');
         this._element = document.createElement('div');
-        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);';
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);overflow:auto;user-select:none;-webkit-user-select:none;';
+        this._element.tabIndex = 0;  // Make focusable for keyboard events
         this._panelId = null;
-        this._cy = null;
         this._className = null;
         this._packageName = null;
+        this._nodes = new Map();  // name -> {pkg, slots, expanded}
+        this._edges = new Set();  // 'from->to'
+        this._rootClass = null;
+        this._focusNode = null;  // Node to center on after render
+        this._viz = null;
+        this._zoom = 1.0;
+        this._baseWidth = 0;
+        this._baseHeight = 0;
+        this._svg = null;
+
+        // Create tooltip element for showing slots on hover
+        this._tooltip = document.createElement('div');
+        this._tooltip.style.cssText = 'position:fixed;display:none;padding:8px 12px;background:var(--bg-secondary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:monospace;max-width:300px;z-index:1000;pointer-events:none;opacity:0.95;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+        document.body.appendChild(this._tooltip);
+
+        // Create child selector popup
+        this._childSelector = document.createElement('div');
+        this._childSelector.style.cssText = 'position:fixed;display:none;padding:4px 0;background:var(--bg-secondary);color:var(--fg-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:monospace;max-height:300px;overflow-y:auto;z-index:1001;box-shadow:0 4px 12px rgba(0,0,0,0.4);min-width:150px;';
+        document.body.appendChild(this._childSelector);
+        this._pendingParent = null;  // Parent node waiting for child selection
+
+        // Keyboard zoom handlers
+        this._element.addEventListener('keydown', (e) => {
+          if (e.key === '+' || e.key === '=') {
+            e.preventDefault();
+            this._setZoom(this._zoom * 1.2);
+          } else if (e.key === '-' || e.key === '_') {
+            e.preventDefault();
+            this._setZoom(this._zoom / 1.2);
+          } else if (e.key === '0') {
+            e.preventDefault();
+            this._setZoom(1.0);  // Reset zoom
+          }
+        });
+
+        // Mouse wheel zoom (with Ctrl)
+        this._element.addEventListener('wheel', (e) => {
+          if (e.ctrlKey) {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            this._setZoom(this._zoom * delta);
+          }
+        }, { passive: false });
+
+        // Click-and-drag panning
+        this._isPanning = false;
+        this._panStartX = 0;
+        this._panStartY = 0;
+        this._scrollStartX = 0;
+        this._scrollStartY = 0;
+        this._didPan = false;  // Track if we actually panned (vs clicked)
+
+        this._element.addEventListener('mousedown', (e) => {
+          if (e.button !== 0) return;
+          this._isPanning = true;
+          this._didPan = false;
+          this._panStartX = e.clientX;
+          this._panStartY = e.clientY;
+          this._scrollStartX = this._element.scrollLeft;
+          this._scrollStartY = this._element.scrollTop;
+        });
+
+        this._element.addEventListener('mousemove', (e) => {
+          if (!this._isPanning) return;
+          const dx = e.clientX - this._panStartX;
+          const dy = e.clientY - this._panStartY;
+          // Only start panning after moving 5+ pixels (prevents accidental drags)
+          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            this._didPan = true;
+            this._element.style.cursor = 'grabbing';
+          }
+          if (this._didPan) {
+            this._element.scrollLeft = this._scrollStartX - dx;
+            this._element.scrollTop = this._scrollStartY - dy;
+          }
+        });
+
+        this._element.addEventListener('mouseup', () => {
+          this._isPanning = false;
+          this._element.style.cursor = 'grab';
+        });
+
+        this._element.addEventListener('mouseleave', () => {
+          this._isPanning = false;
+          this._element.style.cursor = 'grab';
+        });
+
+        // Set initial cursor
+        this._element.style.cursor = 'grab';
       }
       get element() { return this._element; }
-      init(params) {
-        console.log('CytoscapePanel init:', params);
+
+      _setZoom(newZoom) {
+        // Clamp zoom between 0.1 and 5.0
+        this._zoom = Math.max(0.1, Math.min(5.0, newZoom));
+        this._applyZoom();
+      }
+
+      _applyZoom() {
+        if (!this._svg || !this._baseWidth) return;
+        const w = Math.round(this._baseWidth * this._zoom);
+        const h = Math.round(this._baseHeight * this._zoom);
+        this._svg.style.width = w + 'px';
+        this._svg.style.height = h + 'px';
+      }
+
+      async init(params) {
+        console.log('GraphvizPanel init:', params);
         this._panelId = params.params?.panelId;
         this._className = params.params?.className;
         this._packageName = params.params?.packageName;
 
-        // Register for data updates immediately
-        cytoscapeStates.set(this._panelId, this);
+        // Register for data updates
+        graphvizStates.set(this._panelId, this);
 
-        // Delay Cytoscape init until element is in DOM
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            this._initCytoscape();
-          });
-        });
-      }
-
-      _initCytoscape() {
-        console.log('Initializing Cytoscape, container:', this._element, 'in DOM:', document.body.contains(this._element));
-
-        // Initialize Cytoscape
-        this._cy = cytoscape({
-          container: this._element,
-          elements: [],
-          style: [
-            {
-              selector: 'node',
-              style: {
-                'shape': 'round-rectangle',
-                'background-color': '#89b4fa',
-                'label': 'data(label)',
-                'color': '#000000',
-                'font-size': 11,
-                'text-valign': 'center',
-                'text-halign': 'center',
-                'text-wrap': 'wrap',
-                'text-max-width': 180,
-                'width': 200,
-                'padding': 8
-              }
-            },
-            {
-              selector: 'node.root',
-              style: {
-                'background-color': '#f9e2af',
-                'border-width': 2,
-                'border-color': '#fab387'
-              }
-            },
-            {
-              selector: 'edge',
-              style: {
-                'width': 2,
-                'line-color': '#6c7086',
-                'target-arrow-color': '#6c7086',
-                'target-arrow-shape': 'triangle',
-                'curve-style': 'bezier'
-              }
-            }
-          ],
-          minZoom: 0.1,
-          maxZoom: 4
-        });
-        console.log('Cytoscape initialized:', this._cy);
+        // Initialize viz.js
+        this._viz = await Viz.instance();
 
         // Request data if we have class info
         if (this._className && this._packageName) {
@@ -1674,133 +1846,395 @@
             else this.updateGraph(msg);
           });
         }
+      }
 
-        // Click handler - open symbol info for clicked class
-        this._cy.on('tap', 'node', (evt) => {
-          const node = evt.target;
-          const name = node.data('label');
-          const pkg = node.data('package');
-          if (name && pkg) {
-            if (!node.data('expanded')) {
-              node.data('expanded', true);
-              ws.send(JSON.stringify({
-                type: 'expand-class-graph',
-                className: name,
-                packageName: pkg,
-                panelId: this._panelId
-              }));
+      _escapeLabel(str) {
+        // Escape for DOT format
+        return str.replace(/\\\\/g, '\\\\\\\\').replace(/\"/g, '\\\\\"').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      _getThemeColors() {
+        // Read current theme colors from CSS variables
+        const style = getComputedStyle(document.body);
+        return {
+          bg: style.getPropertyValue('--bg-primary').trim() || '#1e1e2e',
+          nodeFill: style.getPropertyValue('--bg-tertiary').trim() || '#45475a',
+          rootFill: style.getPropertyValue('--accent').trim() || '#89b4fa',
+          text: style.getPropertyValue('--fg-primary').trim() || '#cdd6f4',
+          rootText: '#ffffff',  // White text on accent background for readability
+          edge: style.getPropertyValue('--fg-muted').trim() || '#6c7086',
+          border: style.getPropertyValue('--border').trim() || '#45475a'
+        };
+      }
+
+      _getAncestors(nodeName) {
+        // Find all ancestors of a node by traversing edges upward
+        // Edges are stored as 'superclass->subclass'
+        const ancestors = new Set();
+        const toVisit = [nodeName];
+        while (toVisit.length > 0) {
+          const current = toVisit.pop();
+          for (const edge of this._edges) {
+            const [parent, child] = edge.split('->');
+            if (child === current && !ancestors.has(parent)) {
+              ancestors.add(parent);
+              toVisit.push(parent);
             }
-            ws.send(JSON.stringify({type: 'symbol-click', symbol: pkg + '::' + name}));
+          }
+        }
+        return ancestors;
+      }
+
+      _highlightAncestors(nodeName, highlight) {
+        // Add or remove highlight from ancestor nodes AND the hovered node itself
+        const ancestors = this._getAncestors(nodeName);
+        ancestors.add(nodeName);  // Include the hovered node
+        const svg = this._svg;
+        if (!svg) return;
+
+        svg.querySelectorAll('g.node').forEach(g => {
+          const name = g.dataset.nodeName;
+          if (ancestors.has(name)) {
+            const polygon = g.querySelector('polygon') || g.querySelector('path');
+            if (polygon) {
+              if (highlight) {
+                polygon.setAttribute('stroke', 'var(--accent)');
+                polygon.setAttribute('stroke-width', '2.5');
+              } else {
+                // Restore original
+                const colors = this._getThemeColors();
+                polygon.setAttribute('stroke', colors.border);
+                polygon.setAttribute('stroke-width', '1');
+              }
+            }
           }
         });
+      }
 
-        // Resize handling
-        const doResize = () => {
-          if (this._cy) {
-            this._cy.resize();
+      _generateDot(direction = 'TB') {
+        const colors = this._getThemeColors();
+
+        let dot = 'digraph G {\\n';
+        dot += '  rankdir=' + direction + ';\\n';  // TB=top-to-bottom, LR=left-to-right
+        dot += '  newrank=true;\\n';  // Use newer ranking algorithm for consistent hierarchy
+        dot += '  splines=ortho;\\n';  // Orthogonal edges for cleaner look
+        dot += '  ranksep=0.5;\\n';  // Vertical spacing between ranks
+        dot += '  nodesep=0.3;\\n';  // Horizontal spacing between nodes
+        dot += '  bgcolor=\"' + colors.bg + '\";\\n';
+        dot += '  node [shape=box, style=\"filled,rounded\", fontname=\"Helvetica\", fontsize=10, fontcolor=\"' + colors.text + '\", color=\"' + colors.border + '\", margin=\"0.15,0.08\"];\\n';
+        dot += '  edge [arrowhead=empty, color=\"' + colors.edge + '\"];\\n';
+        dot += '\\n';
+
+        // Add nodes (simple labels - slots shown via hover tooltip)
+        for (const [name, info] of this._nodes) {
+          const escName = this._escapeLabel(name);
+          const isRoot = name === this._rootClass;
+          const fillColor = isRoot ? colors.rootFill : colors.nodeFill;
+          const textColor = isRoot ? colors.rootText : colors.text;
+          dot += '  \"' + name + '\" [label=\"' + escName + '\", fillcolor=\"' + fillColor + '\", fontcolor=\"' + textColor + '\"];\\n';
+        }
+
+        dot += '\\n';
+
+        // Add edges - stored as 'superclass->subclass', output same way
+        for (const edge of this._edges) {
+          const [from, to] = edge.split('->');
+          dot += '  \"' + from + '\" -> \"' + to + '\";\\n';
+        }
+
+        dot += '}\\n';
+        return dot;
+      }
+
+      _render() {
+        if (!this._viz || this._nodes.size === 0) return;
+
+        // Get container dimensions (with fallbacks)
+        const containerWidth = this._element.clientWidth || 400;
+        const containerHeight = this._element.clientHeight || 300;
+
+        // Helper to parse SVG dimensions
+        const parseSvgDimensions = (svg) => {
+          let w = 300, h = 200;
+          const widthAttr = svg.getAttribute('width');
+          const heightAttr = svg.getAttribute('height');
+          if (widthAttr) {
+            w = parseFloat(widthAttr);
+            if (widthAttr.endsWith('pt')) w *= 1.33;
+          }
+          if (heightAttr) {
+            h = parseFloat(heightAttr);
+            if (heightAttr.endsWith('pt')) h *= 1.33;
+          }
+          return { width: w, height: h };
+        };
+
+        try {
+          // Try TB (top-to-bottom) first
+          let dot = this._generateDot('TB');
+          let svg = this._viz.renderSVGElement(dot);
+          let dims = parseSvgDimensions(svg);
+
+          // If graph is too wide (more than 2x container width), switch to LR (left-to-right)
+          if (dims.width > containerWidth * 2) {
+            console.log('Graph too wide (' + dims.width + 'px), switching to LR layout');
+            dot = this._generateDot('LR');
+            svg = this._viz.renderSVGElement(dot);
+            dims = parseSvgDimensions(svg);
+          }
+
+          const svgWidth = dims.width;
+          const svgHeight = dims.height;
+
+          // Don't shrink huge graphs to unreadable sizes - just show part and let user pan
+          // Use scale 1.0 (natural size) for most graphs, only shrink if reasonably small
+          const fitScale = Math.min(containerWidth / svgWidth, containerHeight / svgHeight);
+          const initialScale = fitScale > 0.3 ? fitScale : 1.0;  // If would shrink below 30%, just use natural size
+
+          // Store base dimensions for zoom calculations
+          this._baseWidth = Math.round(svgWidth * initialScale);
+          this._baseHeight = Math.round(svgHeight * initialScale);
+          this._zoom = 1.0;  // Reset zoom on new render
+          this._svg = svg;
+
+          // Apply dimensions
+          svg.removeAttribute('width');
+          svg.removeAttribute('height');
+          svg.style.width = this._baseWidth + 'px';
+          svg.style.height = this._baseHeight + 'px';
+          svg.style.display = 'block';
+
+          // Center small graphs that fit within the container
+          if (this._baseWidth < containerWidth) {
+            svg.style.marginLeft = Math.round((containerWidth - this._baseWidth) / 2) + 'px';
+          }
+          if (this._baseHeight < containerHeight) {
+            svg.style.marginTop = Math.round((containerHeight - this._baseHeight) / 2) + 'px';
+          }
+
+          // Process nodes: extract names, then remove ALL title elements to disable native tooltips
+          svg.querySelectorAll('g.node').forEach(g => {
+            const title = g.querySelector('title');
+            if (title) {
+              g.dataset.nodeName = title.textContent;
+            }
+          });
+          svg.querySelectorAll('title').forEach(t => t.remove());
+
+          // Clear and add SVG
+          this._element.innerHTML = '';
+          this._element.appendChild(svg);
+          this._element.focus();  // Focus for keyboard events
+
+          // Add click and hover handlers to nodes
+          svg.querySelectorAll('g.node').forEach(g => {
+            g.style.cursor = 'pointer';
+            const name = g.dataset.nodeName;
+            if (name) {
+              const info = this._nodes.get(name);
+
+              // Click handler
+              g.addEventListener('click', (e) => {
+                // Ignore click if we just finished panning
+                if (this._didPan) {
+                  this._didPan = false;
+                  return;
+                }
+                this._onNodeClick(name, e.clientX, e.clientY);
+              });
+
+              // Hover handlers for slot tooltip and ancestor highlighting
+              g.addEventListener('mouseenter', (e) => {
+                if (!info) {
+                  console.log('No info for node:', name, 'available:', Array.from(this._nodes.keys()));
+                  return;
+                }
+                // Highlight ancestor path
+                this._highlightAncestors(name, true);
+
+                // Show tooltip
+                let content = '<strong>' + name + '</strong>';
+                if (info.pkg) content += '<br><span style=\"color:var(--fg-muted);\">' + info.pkg + '</span>';
+                if (info.slots && info.slots.length > 0) {
+                  const slotList = info.slots.slice(0, 15).join('\\n');
+                  const more = info.slots.length > 15 ? '\\n...' + (info.slots.length - 15) + ' more' : '';
+                  content += '<br><br><em>Direct slots:</em><pre style=\"margin:4px 0 0 0;white-space:pre-wrap;\">' + slotList + more + '</pre>';
+                } else {
+                  content += '<br><span style=\"color:var(--fg-muted);font-style:italic;\">No direct slots</span>';
+                }
+                this._tooltip.innerHTML = content;
+                this._tooltip.style.display = 'block';
+                this._tooltip.style.left = (e.clientX + 10) + 'px';
+                this._tooltip.style.top = (e.clientY + 10) + 'px';
+              });
+
+              g.addEventListener('mousemove', (e) => {
+                if (this._tooltip.style.display === 'block') {
+                  this._tooltip.style.left = (e.clientX + 10) + 'px';
+                  this._tooltip.style.top = (e.clientY + 10) + 'px';
+                }
+              });
+
+              g.addEventListener('mouseleave', () => {
+                this._tooltip.style.display = 'none';
+                // Remove ancestor highlighting
+                this._highlightAncestors(name, false);
+              });
+            }
+          });
+
+          // Scroll to center on focus node (clicked node, or root on initial load)
+          const targetNode = this._focusNode || this._rootClass;
+          if (targetNode) {
+            const nodes = svg.querySelectorAll('g.node');
+            for (const g of nodes) {
+              if (g.dataset.nodeName === targetNode) {
+                const bbox = g.getBoundingClientRect();
+                const containerRect = this._element.getBoundingClientRect();
+                // Scroll to center the node horizontally and vertically
+                const scrollX = (bbox.left - containerRect.left) - (containerWidth / 2) + (bbox.width / 2);
+                const scrollY = (bbox.top - containerRect.top) - (containerHeight / 2) + (bbox.height / 2);
+                this._element.scrollLeft = Math.max(0, scrollX);
+                this._element.scrollTop = Math.max(0, scrollY);
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Graphviz render error:', e);
+          this._element.innerHTML = '<div style=\"padding:20px;color:#f38ba8;\">Render error: ' + e.message + '</div>';
+        }
+      }
+
+      _onNodeClick(name, mouseX, mouseY) {
+        const info = this._nodes.get(name);
+        if (!info) return;
+
+        // Send symbol click for info panel
+        ws.send(JSON.stringify({type: 'symbol-click', symbol: info.pkg + '::' + name}));
+
+        // Request children list for selector popup (if not already expanded)
+        if (!info.expanded) {
+          this._pendingParent = { name, pkg: info.pkg, x: mouseX, y: mouseY };
+          ws.send(JSON.stringify({
+            type: 'list-class-children',
+            className: name,
+            packageName: info.pkg,
+            panelId: this._panelId
+          }));
+        }
+      }
+
+      showChildSelector(msg) {
+        const children = msg.children || [];
+        const parentName = msg['parent-name'] || msg.parentName;
+        const parentPkg = msg['parent-package'] || msg.parentPackage;
+
+        // Hide selector if no children
+        if (children.length === 0) {
+          this._childSelector.style.display = 'none';
+          // Mark as expanded (no children to show)
+          const info = this._nodes.get(parentName);
+          if (info) info.expanded = true;
+          return;
+        }
+
+        // Position near the click
+        const pos = this._pendingParent || { x: 100, y: 100 };
+        this._childSelector.style.left = pos.x + 'px';
+        this._childSelector.style.top = pos.y + 'px';
+
+        // Build list of children
+        this._childSelector.innerHTML = '';
+        children.forEach(([childName, childPkg]) => {
+          // Skip if already in graph
+          if (this._nodes.has(childName)) return;
+
+          const item = document.createElement('div');
+          item.style.cssText = 'padding:6px 12px;cursor:pointer;white-space:nowrap;';
+          item.textContent = childName;
+          item.addEventListener('mouseenter', () => {
+            item.style.background = 'var(--accent)';
+            item.style.color = '#ffffff';
+          });
+          item.addEventListener('mouseleave', () => {
+            item.style.background = '';
+            item.style.color = '';
+          });
+          item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._childSelector.style.display = 'none';
+            // Add just this child
+            this._focusNode = childName;
+            ws.send(JSON.stringify({
+              type: 'add-class-child',
+              parentName: parentName,
+              childName: childName,
+              childPackage: childPkg,
+              panelId: this._panelId
+            }));
+          });
+          this._childSelector.appendChild(item);
+        });
+
+        // If all children already in graph, mark as expanded
+        if (this._childSelector.children.length === 0) {
+          const info = this._nodes.get(parentName);
+          if (info) info.expanded = true;
+          return;
+        }
+
+        this._childSelector.style.display = 'block';
+
+        // Close on click outside
+        const closeHandler = (e) => {
+          if (!this._childSelector.contains(e.target)) {
+            this._childSelector.style.display = 'none';
+            document.removeEventListener('click', closeHandler);
           }
         };
-        new ResizeObserver(doResize).observe(this._element);
-
-        // Initial resize after a moment
-        setTimeout(doResize, 50);
+        setTimeout(() => document.addEventListener('click', closeHandler), 0);
       }
 
       updateGraph(msg) {
         console.log('updateGraph called:', msg);
-        if (!this._cy) {
-          // Cytoscape not ready yet, store for later
+        if (!this._viz) {
           const pending = pendingClassGraphs.get(this._panelId) || [];
           pending.push(msg);
           pendingClassGraphs.set(this._panelId, pending);
           return;
         }
         if (msg.error) {
-          this._element.innerHTML = '<div style=\"padding:20px;color:var(--fg-muted);\">Error: ' + msg.error + '</div>';
+          this._element.innerHTML = '<div style=\"padding:20px;color:#a6adc8;\">Error: ' + msg.error + '</div>';
           return;
         }
 
-        const elements = [];
-        const rootClass = msg['class-name'] || msg.className;
-        console.log('Root class:', rootClass);
-        console.log('Nodes received:', JSON.stringify(msg.nodes));
-        console.log('Edges received:', JSON.stringify(msg.edges));
+        this._rootClass = msg['class-name'] || msg.className;
+        this._focusNode = this._rootClass;  // Center on root initially
+        this._nodes.clear();
+        this._edges.clear();
 
-        // Collect node IDs for validation
-        const nodeIds = new Set();
-
-        // Add nodes - now with slots: [name, pkg, [slot1, slot2, ...]]
+        // Add nodes - format: [name, pkg, [slot1, slot2, ...]]
         (msg.nodes || []).forEach((nodeData) => {
           const name = nodeData[0];
           const pkg = nodeData[1];
           const slots = Array.isArray(nodeData[2]) ? nodeData[2] : [];
-          nodeIds.add(name);
-
-          // Escape special characters for display
-          const escName = name.replace(/</g, '‹').replace(/>/g, '›');
-
-          // Build label with class name and slots
-          let label = escName;
-          if (slots.length > 0) {
-            // Show slots compactly below class name with separator
-            const escSlots = slots.map(s => s.replace(/</g, '‹').replace(/>/g, '›'));
-            const slotStr = escSlots.slice(0, 6).join(' ');
-            const more = slots.length > 6 ? ' …' : '';
-            label = escName + '\\n────────────────\\n' + slotStr + more;
-          }
-
-          elements.push({
-            data: {
-              id: name,
-              label: label,
-              className: name,
-              package: pkg,
-              slots: slots,
-              slotCount: slots.length,
-              expanded: false
-            },
-            classes: name === rootClass ? 'root' : ''
-          });
+          this._nodes.set(name, { pkg, slots, expanded: false });
         });
 
-        // Add edges (from superclass to subclass) - skip edges with missing endpoints
+        // Add edges (from superclass to subclass in msg, stored as 'from->to')
         (msg.edges || []).forEach(([from, to]) => {
-          if (!nodeIds.has(from)) {
-            console.warn('Skipping edge - source not in nodes:', from);
-            return;
+          if (this._nodes.has(from) && this._nodes.has(to)) {
+            this._edges.add(from + '->' + to);
           }
-          if (!nodeIds.has(to)) {
-            console.warn('Skipping edge - target not in nodes:', to);
-            return;
-          }
-          elements.push({
-            data: { id: from + '->' + to, source: from, target: to }
-          });
         });
 
-        console.log('Total elements:', elements.length, 'nodes:', nodeIds.size);
-
-        this._cy.elements().remove();
-        this._cy.add(elements);
-
-        // Run layout
-        const roots = this._cy.nodes().filter(n => n.indegree() === 0);
-        this._cy.layout({
-          name: 'breadthfirst',
-          directed: true,
-          spacingFactor: 0.6,
-          avoidOverlap: true,
-          padding: 20,
-          nodeDimensionsIncludeLabels: true,
-          fit: true,
-          animate: false,
-          roots: (roots && roots.length) ? roots : undefined
-        }).run();
+        this._render();
       }
 
       addGraph(msg) {
         console.log('addGraph called:', msg);
-        if (!this._cy) {
+        if (!this._viz) {
           const pending = pendingClassGraphs.get(this._panelId) || [];
           pending.push(msg);
           pendingClassGraphs.set(this._panelId, pending);
@@ -1811,46 +2245,36 @@
           return;
         }
 
-        const nodeIds = new Set(this._cy.nodes().map(n => n.id()));
-        const edgeIds = new Set(this._cy.edges().map(e => e.id()));
-        let added = false;
+        let changed = false;
 
-        (msg.nodes || []).forEach(([name, pkg]) => {
-          if (nodeIds.has(name)) return;
-          this._cy.add({
-            data: { id: name, label: name, package: pkg, expanded: false }
-          });
-          added = true;
+        (msg.nodes || []).forEach(([name, pkg, slots]) => {
+          if (!this._nodes.has(name)) {
+            this._nodes.set(name, { pkg, slots: slots || [], expanded: false });
+            changed = true;
+          }
         });
 
         (msg.edges || []).forEach(([from, to]) => {
-          const edgeId = from + '->' + to;
-          if (edgeIds.has(edgeId)) return;
-          this._cy.add({
-            data: { id: edgeId, source: from, target: to }
-          });
-          added = true;
+          const edgeKey = from + '->' + to;
+          if (!this._edges.has(edgeKey) && this._nodes.has(from) && this._nodes.has(to)) {
+            this._edges.add(edgeKey);
+            changed = true;
+          }
         });
 
-        if (added) {
-          const roots = this._cy.nodes().filter(n => n.indegree() === 0);
-          this._cy.layout({
-            name: 'breadthfirst',
-            directed: true,
-            spacingFactor: 0.6,
-            avoidOverlap: true,
-            padding: 20,
-            nodeDimensionsIncludeLabels: true,
-            fit: true,
-            animate: false,
-            roots: (roots && roots.length) ? roots : undefined
-          }).run();
+        if (changed) {
+          this._render();
         }
       }
 
       dispose() {
-        if (this._panelId) cytoscapeStates.delete(this._panelId);
-        if (this._cy) this._cy.destroy();
+        if (this._panelId) graphvizStates.delete(this._panelId);
+        if (this._tooltip && this._tooltip.parentNode) {
+          this._tooltip.parentNode.removeChild(this._tooltip);
+        }
+        if (this._childSelector && this._childSelector.parentNode) {
+          this._childSelector.parentNode.removeChild(this._childSelector);
+        }
       }
     }
 
@@ -1904,16 +2328,24 @@
       get element() { return this._element; }
       init(params) {
         setTimeout(() => {
+          // Build initial theme - use pending theme if available, otherwise default dark
+          let initialTheme = { background: '#1e1e1e' };
+          if (pendingTheme && pendingTheme.xterm) {
+            initialTheme = {};
+            Object.entries(pendingTheme.xterm).forEach(([k, v]) => {
+              initialTheme[k] = v;
+            });
+            pendingTheme = null;
+          }
           terminal = new Terminal({
             cursorBlink: true,
             fontFamily: \"'JetBrains Mono', monospace\",
             fontSize: 14,
-            theme: { background: '#1e1e1e' }
+            theme: initialTheme
           });
           fitAddon = new FitAddon.FitAddon();
           terminal.loadAddon(fitAddon);
           terminal.open(this._element);
-          // Don't fit immediately - wait for Dockview layout to settle
 
           // Send all input directly to Lisp - the editor handles everything
           terminal.onData(data => {
@@ -2059,7 +2491,7 @@
           case 'dynamic-inspector': return new DynamicInspectorPanel();
           case 'speedscope': return new SpeedscopePanel();
           case 'hashtable': return new HashTablePanel();
-          case 'cytoscape': return new CytoscapePanel();
+          case 'graphviz': return new GraphvizPanel();
           case 'terminal': return new TerminalPanel();
         }
       }

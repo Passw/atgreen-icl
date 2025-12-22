@@ -1858,6 +1858,18 @@
             else this.updateGraph(msg);
           });
         }
+
+        // Re-render on resize (debounced)
+        let resizeTimeout = null;
+        const resizeObserver = new ResizeObserver(() => {
+          if (resizeTimeout) clearTimeout(resizeTimeout);
+          resizeTimeout = setTimeout(() => {
+            if (this._nodes.size > 0) {
+              this._render();
+            }
+          }, 150);
+        });
+        resizeObserver.observe(this._element);
       }
 
       _escapeLabel(str) {

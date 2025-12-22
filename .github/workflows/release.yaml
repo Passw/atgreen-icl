@@ -240,6 +240,8 @@ jobs:
           Copy-Item "THIRD-PARTY-LICENSES.txt" "releng\installer\wix\"
           # Copy bundled ASDF
           Copy-Item -Recurse "3rd-party" "releng\installer\wix\"
+          # Copy web assets (including WEB-LICENSES)
+          Copy-Item -Recurse "assets" "releng\installer\wix\"
           cd releng\installer\wix
           wix build icl.wxs -o "..\..\..\icl-$VERSION.msi" -d VERSION=$VERSION -d SourceDir=. -ext WixToolset.UI.wixext
 

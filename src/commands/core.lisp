@@ -1187,7 +1187,7 @@ Examples:
                    (:hash-table
                     (let ((count (second parsed))
                           (entries (third parsed)))
-                      (open-hash-table-panel trimmed count entries)
+                      (open-hash-table-panel trimmed count entries trimmed)
                       (format t "~&; Visualizing hash-table (~A entries)~%" count)))
                    (:symbol
                     (format t "~&; Symbol ~A is not a class name~%" (second parsed)))

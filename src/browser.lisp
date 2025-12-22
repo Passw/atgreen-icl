@@ -456,7 +456,17 @@
                (bt:make-thread
                 (lambda ()
                   (send-single-child client parent-name child-name child-pkg panel-id))
-                :name "add-child-handler")))))))))
+                :name "add-child-handler"))))
+
+          ;; Refresh hash-table data
+          ((string= type "refresh-hashtable")
+           (let ((source-expr (gethash "sourceExpr" json))
+                 (panel-id (gethash "panelId" json)))
+             (when source-expr
+               (bt:make-thread
+                (lambda ()
+                  (send-hashtable-refresh client source-expr panel-id))
+                :name "refresh-hashtable-handler")))))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; WebSocket Send Helpers
@@ -515,6 +525,16 @@
     (ignore-errors
       (dolist (client (hunchensocket:clients *repl-resource*))
         (send-packages-list client)))))
+
+(defun refresh-browser-visualizations ()
+  "Signal browser to refresh visualization panels (hash-tables, class graphs).
+   Called after REPL evaluation to pick up data changes."
+  (when (and *repl-resource* *browser-terminal-active*)
+    (ignore-errors
+      (dolist (client (hunchensocket:clients *repl-resource*))
+        (let ((obj (make-hash-table :test 'equal)))
+          (setf (gethash "type" obj) "refresh-visualizations")
+          (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj)))))))
 
 (defun open-speedscope-panel (profile-id &optional title)
   "Send message to browser to open a Speedscope panel for PROFILE-ID."
@@ -638,6 +658,33 @@
                :panel-id panel-id
                :error (format nil "~A" e)))))
 
+(defun send-hashtable-refresh (client source-expr panel-id)
+  "Re-evaluate SOURCE-EXPR and send updated hash-table data to CLIENT."
+  (browser-log "send-hashtable-refresh: expr=~S panel-id=~S" source-expr panel-id)
+  (handler-case
+      (let* ((query (format nil "(let ((obj ~A))
+                                   (if (hash-table-p obj)
+                                       (list :count (hash-table-count obj)
+                                             :entries (loop for k being the hash-keys of obj using (hash-value v)
+                                                            for i from 0 below 100
+                                                            collect (list (princ-to-string k)
+                                                                          (princ-to-string v))))
+                                       (list :error \"No longer a hash-table\")))"
+                            source-expr))
+             (result (browser-query query)))
+        (when result
+          (let ((obj (make-hash-table :test 'equal)))
+            (setf (gethash "type" obj) "hashtable-refresh")
+            (setf (gethash "panelId" obj) panel-id)
+            (if (getf result :error)
+                (setf (gethash "error" obj) (getf result :error))
+                (progn
+                  (setf (gethash "count" obj) (getf result :count))
+                  (setf (gethash "entries" obj) (getf result :entries))))
+            (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj)))))
+    (error (e)
+      (browser-log "send-hashtable-refresh: ERROR ~A" e))))
+
 (defun open-class-graph-panel (class-name package-name)
   "Send message to browser to open a class graph panel."
   (when *repl-resource*
@@ -648,7 +695,7 @@
         (setf (gethash "packageName" obj) package-name)
         (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
 
-(defun open-hash-table-panel (title count entries)
+(defun open-hash-table-panel (title count entries &optional source-expr)
   "Send message to browser to open a hash-table visualization panel."
   (when *repl-resource*
     (dolist (client (hunchensocket:clients *repl-resource*))
@@ -657,6 +704,8 @@
         (setf (gethash "title" obj) title)
         (setf (gethash "count" obj) count)
         (setf (gethash "entries" obj) entries)
+        (when source-expr
+          (setf (gethash "sourceExpr" obj) source-expr))
         (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
 
 (defun needs-case-escape-p (str)
@@ -1207,7 +1256,13 @@
           openClassGraphPanel(msg.className, msg.packageName);
           break;
         case 'open-hash-table':
-          openHashTablePanel(msg.title, msg.count, msg.entries);
+          openHashTablePanel(msg.title, msg.count, msg.entries, msg.sourceExpr);
+          break;
+        case 'refresh-visualizations':
+          refreshAllVisualizations();
+          break;
+        case 'hashtable-refresh':
+          handleHashtableRefresh(msg);
           break;
       }
     };
@@ -1281,19 +1336,59 @@
 
     // Open hash-table panel
     let hashTableCounter = 0;
-    function openHashTablePanel(title, count, entries) {
-      console.log('openHashTablePanel called:', title, count, entries?.length);
+    const hashtableStates = new Map();  // panelId -> HashTablePanel instance
+
+    function openHashTablePanel(title, count, entries, sourceExpr) {
+      console.log('openHashTablePanel called:', title, count, entries?.length, sourceExpr);
       const panelId = 'hashtable-' + (++hashTableCounter);
       if (dockviewApi) {
         dockviewApi.addPanel({
           id: panelId,
           component: 'hashtable',
           title: title || 'Hash Table',
-          params: { panelId, count, entries },
+          params: { panelId, count, entries, sourceExpr },
           position: { referencePanel: 'terminal', direction: 'right' }
         });
       } else {
         console.error('dockviewApi not available');
+      }
+    }
+
+    // Refresh all visualization panels
+    function refreshAllVisualizations() {
+      // Refresh hash-table panels
+      hashtableStates.forEach((panel, panelId) => {
+        if (panel._sourceExpr) {
+          ws.send(JSON.stringify({
+            type: 'refresh-hashtable',
+            sourceExpr: panel._sourceExpr,
+            panelId: panelId
+          }));
+        }
+      });
+      // Refresh class graph panels
+      graphvizStates.forEach((panel, panelId) => {
+        if (panel._className && panel._packageName) {
+          ws.send(JSON.stringify({
+            type: 'get-class-graph',
+            className: panel._className,
+            packageName: panel._packageName,
+            panelId: panelId
+          }));
+        }
+      });
+    }
+
+    // Handle hash-table refresh data
+    function handleHashtableRefresh(msg) {
+      const panelId = msg.panelId;
+      const panel = hashtableStates.get(panelId);
+      if (panel) {
+        if (msg.error) {
+          console.log('Hash-table refresh error:', msg.error);
+        } else {
+          panel.updateData(msg.count, msg.entries);
+        }
       }
     }
 
@@ -1677,12 +1772,29 @@
       constructor() {
         this._element = document.createElement('div');
         this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);overflow:auto;padding:8px;';
+        this._panelId = null;
+        this._sourceExpr = null;
       }
       get element() { return this._element; }
       init(params) {
+        this._panelId = params.params?.panelId;
+        this._sourceExpr = params.params?.sourceExpr;
         const count = params.params?.count || 0;
         const entries = params.params?.entries || [];
 
+        // Register for refresh updates
+        if (this._panelId) {
+          hashtableStates.set(this._panelId, this);
+        }
+
+        this._renderTable(count, entries);
+      }
+
+      updateData(count, entries) {
+        this._renderTable(count, entries);
+      }
+
+      _renderTable(count, entries) {
         // Build HTML table
         let html = '<div style=\"font-family:monospace;font-size:13px;color:var(--fg-primary);\">';
         html += '<div style=\"margin-bottom:8px;color:var(--fg-secondary);\">Hash Table (' + count + ' entries)</div>';
@@ -1692,7 +1804,7 @@
         html += '<th style=\"text-align:left;padding:4px 8px;border:1px solid var(--border);\">Value</th>';
         html += '</tr></thead><tbody>';
 
-        entries.forEach(([key, value]) => {
+        (entries || []).forEach(([key, value]) => {
           const escKey = (key || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           const escValue = (value || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
           html += '<tr style=\"background:var(--bg-secondary);\">';
@@ -1701,7 +1813,7 @@
           html += '</tr>';
         });
 
-        if (count > entries.length) {
+        if (count > (entries || []).length) {
           html += '<tr style=\"background:var(--bg-secondary);color:var(--fg-secondary);\">';
           html += '<td colspan=\"2\" style=\"padding:4px 8px;border:1px solid var(--border);text-align:center;font-style:italic;\">';
           html += '... and ' + (count - entries.length) + ' more entries</td></tr>';

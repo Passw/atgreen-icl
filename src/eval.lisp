@@ -150,9 +150,10 @@
             (t
              ;; Unexpected result type - print as-is
              (format t "~A~S~%" (colorize *result-prefix* *color-prefix*) result)))
-          ;; Refresh browser package/symbol lists after successful evaluation
+          ;; Refresh browser package/symbol lists and visualizations after successful evaluation
           (when *browser-terminal-active*
-            (refresh-browser-lists)))
+            (refresh-browser-lists)
+            (refresh-browser-visualizations)))
       (undefined-function (e)
         (let ((msg (format nil "Undefined function: ~A" (cell-error-name e))))
           (sync-package-context-from-backend)

@@ -478,9 +478,12 @@
 (defun ensure-backend ()
   "Ensure a Lisp backend is available via Slynk."
   (when *verbose*
-    (format t "~&; ensure-backend: *slynk-connected-p*=~A inferior-alive=~A~%"
-            *slynk-connected-p* (inferior-lisp-alive-p)))
+    (format t "~&; ensure-backend: *slynk-connected-p*=~A inferior-alive=~A external=~A~%"
+            *slynk-connected-p* (inferior-lisp-alive-p) *external-slynk-connection*))
   (when (not *slynk-connected-p*)
+    ;; For external connections, don't try to spawn a new process
+    (when *external-slynk-connection*
+      (error "Lost connection to external Slynk server"))
     (unless (inferior-lisp-alive-p)
       (start-inferior-lisp))
     (unless *slynk-connected-p*

@@ -59,6 +59,7 @@
    #:*slynk-host*
    #:*default-lisp*
    #:*slynk-connected-p*
+   #:*external-slynk-connection*
    #:configure-lisp
    #:slynk-connect
    #:slynk-disconnect

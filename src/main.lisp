@@ -131,6 +131,7 @@
            (parse-connect-string connect-str)
          (setf *slynk-host* host)
          (setf *slynk-port* port)
+         (setf *external-slynk-connection* t)  ; Mark as external connection
          (unless (slynk-connect :host host :port port)
            (format *error-output* "~&Failed to connect to ~A:~D~%" host port)
            (uiop:quit 1))))

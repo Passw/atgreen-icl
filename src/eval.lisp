@@ -168,7 +168,11 @@
         ;; Give the process a moment to die (quit may be async)
         (sleep 0.1)
         ;; If backend connection lost or process died, exit the REPL quietly
-        (unless (and *slynk-connected-p* (inferior-lisp-alive-p))
+        ;; For external connections (--connect), only check *slynk-connected-p*
+        ;; For spawned processes, also check if the process is still alive
+        (unless (if *external-slynk-connection*
+                    *slynk-connected-p*
+                    (and *slynk-connected-p* (inferior-lisp-alive-p)))
           (setf *slynk-connected-p* nil)
           (invoke-restart 'quit))
         ;; Record error for MCP

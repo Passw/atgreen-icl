@@ -297,6 +297,10 @@
 (defvar *verbose* nil
   "When T, print verbose startup information.")
 
+(defvar *external-slynk-connection* nil
+  "T when connected to an external Slynk server via --connect.
+   When NIL, we spawned our own inferior lisp process.")
+
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Command Output Capture
 ;;; ─────────────────────────────────────────────────────────────────────────────

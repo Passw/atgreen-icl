@@ -2,72 +2,166 @@
 
 ;; Copyright (C) 2025 Anthony Green <green@moxielogic.com>
 ;; SPDX-License-Identifier: MIT
+;;
+;; Author: Anthony Green <green@moxielogic.com>
+;; Maintainer: Anthony Green <green@moxielogic.com>
+;; URL: https://github.com/moxielogic/icl
+;; Version: 1.12.0
+;; Package-Requires: ((emacs "26.1"))
+;; Keywords: lisp, tools, repl
 
 ;;; Commentary:
-;; Provides integration between Sly and ICL's browser visualization interface.
-;; Start ICL browser with M-x icl-browser when you have an active Sly connection.
+;; Provides integration between SLY/SLIME and ICL's browser visualization interface.
+;; Start ICL browser with M-x icl when you have an active Sly connection.
 
 ;;; Code:
 
-(require 'sly)
+(require 'sly nil t)
+(require 'slime nil t)
 
 (defgroup icl nil
   "ICL browser integration."
-  :group 'sly)
+  :group 'tools)
 
-(defcustom icl-program "icl"
+(defcustom icl-program "/home/green/git/icl/icl"
   "Path to the ICL executable."
   :type 'string
+  :group 'icl)
+
+(defcustom icl-backend 'auto
+  "Which Emacs backend to use: 'auto, 'sly, or 'slime."
+  :type '(choice (const :tag "Auto-detect" auto)
+                 (const :tag "SLY" sly)
+                 (const :tag "SLIME" slime))
+  :group 'icl)
+
+(defcustom icl-auto-stop-on-disconnect t
+  "When non-nil, stop the ICL process after the SLY/SLIME connection closes."
+  :type 'boolean
   :group 'icl)
 
 (defvar icl--slynk-port nil
   "Port of the Slynk server created for ICL.")
 
+(defvar icl--sly-hooks-installed nil
+  "Non-nil when disconnect hooks have been installed.")
+
+(defun icl--backend ()
+  "Return the active backend symbol: 'sly or 'slime."
+  (pcase icl-backend
+    ('sly
+     (unless (or (featurep 'sly) (require 'sly nil t))
+       (user-error "SLY not available. Install sly or set icl-backend to 'slime"))
+     'sly)
+    ('slime
+     (unless (or (featurep 'slime) (require 'slime nil t))
+       (user-error "SLIME not available. Install slime or set icl-backend to 'sly"))
+     'slime)
+    (_
+     (cond
+      ((or (featurep 'sly) (require 'sly nil t)) 'sly)
+      ((or (featurep 'slime) (require 'slime nil t)) 'slime)
+      (t (user-error "Neither SLY nor SLIME is available"))))))
+
+(defun icl--connected-p ()
+  "Return non-nil when the selected backend has an active connection."
+  (pcase (icl--backend)
+    ('sly (and (fboundp 'sly-current-connection) (sly-current-connection)))
+    ('slime (or (and (fboundp 'slime-connected-p) (slime-connected-p))
+                (and (fboundp 'slime-current-connection) (slime-current-connection))))))
+
+(defun icl--eval (form)
+  "Evaluate FORM in the backend connection."
+  (pcase (icl--backend)
+    ('sly (sly-eval form))
+    ('slime (slime-eval form))))
+
+(defun icl--ensure-slynk-and-create-server ()
+  "Ensure Slynk is available in the Lisp image and create a server."
+  (icl--eval
+   '(cl:progn
+      (cl:when (cl:not (cl:find-package :slynk))
+        (cl:handler-case
+            (asdf:load-system :slynk)
+          (error (e)
+            (error "Failed to load Slynk: ~A" e))))
+      (slynk:create-server :port 0 :dont-close t))))
+
+(defun icl--on-sly-disconnect (&rest _)
+  "Stop ICL shortly after the connection disconnects."
+  (when icl-auto-stop-on-disconnect
+    (run-at-time 0.2 nil #'icl-stop)))
+
+(defun icl--maybe-install-sly-hooks ()
+  "Install hooks to stop ICL when the connection disconnects."
+  (unless icl--sly-hooks-installed
+    ;; Hook variants across SLY versions.
+    (when (boundp 'sly-disconnect-hook)
+      (add-hook 'sly-disconnect-hook #'icl--on-sly-disconnect))
+    (when (boundp 'sly-disconnected-hook)
+      (add-hook 'sly-disconnected-hook #'icl--on-sly-disconnect))
+    (when (boundp 'sly-net-close-hook)
+      (add-hook 'sly-net-close-hook #'icl--on-sly-disconnect))
+    ;; SLIME hook variants.
+    (when (boundp 'slime-disconnect-hook)
+      (add-hook 'slime-disconnect-hook #'icl--on-sly-disconnect))
+    (when (boundp 'slime-net-close-hook)
+      (add-hook 'slime-net-close-hook #'icl--on-sly-disconnect))
+    (when (boundp 'slime-connection-closed-hook)
+      (add-hook 'slime-connection-closed-hook #'icl--on-sly-disconnect))
+    (setq icl--sly-hooks-installed t)))
+
 (defun icl--setup-eval-hook ()
   "Set up eval generation counter in the Lisp image."
   ;; All symbols must be fully qualified to CL-USER since slynk reads
   ;; forms in its own package context
-  (sly-eval '(cl:progn
-              (cl:defvar cl-user::*icl-eval-generation* 0)
-              ;; Define the hook function
-              (cl:defun cl-user::icl-increment-eval-generation ()
-                (cl:incf cl-user::*icl-eval-generation*))
-              ;; Only add the hook if not already present
-              ;; Use slynk:: (internal) since *pre-reply-hook* is not exported
-              (cl:unless (cl:member (cl:quote cl-user::icl-increment-eval-generation)
-                                    slynk::*pre-reply-hook*)
-                (cl:push (cl:quote cl-user::icl-increment-eval-generation)
-                         slynk::*pre-reply-hook*))
-              t)))
+  (icl--eval '(cl:progn
+               (cl:defvar cl-user::*icl-eval-generation* 0)
+               ;; Define the hook function
+               (cl:defun cl-user::icl-increment-eval-generation ()
+                 (cl:unless (cl:boundp (cl:quote cl-user::*icl-eval-generation*))
+                   (cl:setf cl-user::*icl-eval-generation* 0))
+                 (cl:incf cl-user::*icl-eval-generation*))
+               ;; Only add the hook if not already present
+               ;; Use slynk:: (internal) since *pre-reply-hook* is not exported
+               (cl:unless (cl:member (cl:quote cl-user::icl-increment-eval-generation)
+                                     slynk::*pre-reply-hook*)
+                 (cl:push (cl:quote cl-user::icl-increment-eval-generation)
+                          slynk::*pre-reply-hook*))
+               t)))
 
-(defun icl-browser ()
+;;;###autoload
+(defun icl ()
   "Start ICL browser connected to the current Sly session."
   (interactive)
-  (unless (sly-current-connection)
-    (user-error "No active Sly connection"))
-  (when (get-process "icl-browser")
-    (user-error "ICL browser already running. Use M-x icl-browser-stop first"))
+  (unless (icl--connected-p)
+    (user-error "No active SLY/SLIME connection"))
+  (when (get-process "icl")
+    (user-error "ICL already running. Use M-x icl-stop first"))
+  (icl--maybe-install-sly-hooks)
   ;; Set up eval generation counter for visualization refresh
   (icl--setup-eval-hook)
   ;; Create a Slynk server that accepts connections
-  (let ((port (sly-eval '(slynk:create-server :port 0 :dont-close t))))
+  (let ((port (icl--ensure-slynk-and-create-server)))
     (setq icl--slynk-port port)
     (message "ICL connecting on port %d" port)
-    (start-process "icl-browser" "*icl-browser*" icl-program
+    (start-process "icl" "*icl*" icl-program
                    "--connect" (format "localhost:%d" port) "-b")))
 
-(defun icl-browser-stop ()
-  "Stop ICL browser process."
+;;;###autoload
+(defun icl-stop ()
+  "Stop ICL process."
   (interactive)
-  (when-let ((proc (get-process "icl-browser")))
+  (when-let ((proc (get-process "icl")))
     (kill-process proc)
-    (message "ICL browser stopped")))
+    (message "ICL stopped")))
 
-(defun icl-browser-restart ()
-  "Restart ICL browser."
+;;;###autoload
+(defun icl-restart ()
+  "Restart ICL."
   (interactive)
-  (icl-browser-stop)
-  (run-at-time 0.5 nil #'icl-browser))
+  (icl-stop)
+  (run-at-time 0.5 nil #'icl))
 
 (provide 'icl)
 ;;; icl.el ends here

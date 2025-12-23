@@ -768,20 +768,48 @@
       (browser-log "send-venn-refresh: ERROR ~A" e))))
 
 (defun send-html-refresh (client source-expr panel-id)
-  "Re-evaluate SOURCE-EXPR and send updated HTML content to panel."
+  "Re-evaluate SOURCE-EXPR and send updated HTML content, or signal type change."
   (browser-log "send-html-refresh: expr=~S panel-id=~S" source-expr panel-id)
   (handler-case
       (let* ((query (format nil "(let ((obj ~A))
-                                   (if (stringp obj) obj nil))"
+                                   (cond
+                                     ((and (stringp obj)
+                                           (let ((trimmed (string-left-trim '(#\\Space #\\Tab #\\Newline) obj)))
+                                             (or (and (>= (length trimmed) 9)
+                                                      (string-equal (subseq trimmed 0 9) \"<!DOCTYPE\"))
+                                                 (and (>= (length trimmed) 5)
+                                                      (string-equal (subseq trimmed 0 5) \"<html\")))))
+                                      (list :html obj))
+                                     ((hash-table-p obj)
+                                      (list :hash-table
+                                            (hash-table-count obj)
+                                            (loop for k being the hash-keys of obj using (hash-value v)
+                                                  for i from 0 below 100
+                                                  collect (list (princ-to-string k) (princ-to-string v)))))
+                                     (t (list :other (princ-to-string (type-of obj))))))"
                             source-expr))
              (result (browser-query query)))
-        (let ((obj (make-hash-table :test 'equal)))
-          (setf (gethash "type" obj) "html-refresh")
-          (setf (gethash "panelId" obj) panel-id)
-          (if result
-              (setf (gethash "content" obj) result)
-              (setf (gethash "error" obj) "Expression did not evaluate to a string"))
-          (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))
+        (when result
+          (let ((obj (make-hash-table :test 'equal))
+                (parsed (ignore-errors (read-from-string result))))
+            (cond
+              ((and parsed (eq (first parsed) :html))
+               (setf (gethash "type" obj) "html-refresh")
+               (setf (gethash "panelId" obj) panel-id)
+               (setf (gethash "content" obj) (second parsed)))
+              ((and parsed (eq (first parsed) :hash-table))
+               ;; Type changed to hash-table - signal panel replacement
+               (setf (gethash "type" obj) "viz-type-changed")
+               (setf (gethash "panelId" obj) panel-id)
+               (setf (gethash "sourceExpr" obj) source-expr)
+               (setf (gethash "newType" obj) "hash-table")
+               (setf (gethash "count" obj) (second parsed))
+               (setf (gethash "entries" obj) (third parsed)))
+              (t
+               (setf (gethash "type" obj) "html-refresh")
+               (setf (gethash "panelId" obj) panel-id)
+               (setf (gethash "error" obj) (format nil "Value changed to ~A" (second parsed)))))
+            (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj)))))
     (error (e)
       (browser-log "send-html-refresh: ERROR ~A" e))))
 
@@ -1441,6 +1469,9 @@
         case 'svg-refresh':
           handleSvgRefresh(msg);
           break;
+        case 'viz-type-changed':
+          handleVizTypeChanged(msg);
+          break;
       }
     };
 
@@ -1698,6 +1729,34 @@
           }
         }
       }
+    }
+
+    // Handle visualization type change - close old panel and open new one
+    function handleVizTypeChanged(msg) {
+      const oldPanelId = msg.panelId;
+      const sourceExpr = msg.sourceExpr;
+      const newType = msg.newType;
+      console.log('handleVizTypeChanged:', oldPanelId, '->', newType, 'for', sourceExpr);
+
+      // Remove old panel from state maps
+      if (htmlStates.has(oldPanelId)) {
+        htmlStates.delete(oldPanelId);
+      }
+      if (svgStates.has(oldPanelId)) {
+        svgStates.delete(oldPanelId);
+      }
+
+      // Close old panel in dockview
+      const oldPanel = dockviewApi?.getPanel(oldPanelId);
+      if (oldPanel) {
+        dockviewApi.removePanel(oldPanel);
+      }
+
+      // Open new panel of appropriate type
+      if (newType === 'hash-table') {
+        openHashTablePanel(sourceExpr, msg.count, msg.entries, sourceExpr);
+      }
+      // Add other type handlers as needed
     }
 
     // Open Venn diagram panel

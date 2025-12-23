@@ -1276,6 +1276,22 @@ Examples:
                                             (loop for m in members
                                                   for i from 0 below 100
                                                   collect (princ-to-string m)))))
+                                   ;; SVG string detection
+                                   ((and (stringp obj)
+                                         (let ((trimmed (string-left-trim '(#\\Space #\\Tab #\\Newline) obj)))
+                                           (or (and (>= (length trimmed) 5)
+                                                    (string-equal (subseq trimmed 0 5) \"<?xml\"))
+                                               (and (>= (length trimmed) 4)
+                                                    (string-equal (subseq trimmed 0 4) \"<svg\")))))
+                                    (list :svg obj))
+                                   ;; HTML string detection
+                                   ((and (stringp obj)
+                                         (let ((trimmed (string-left-trim '(#\\Space #\\Tab #\\Newline) obj)))
+                                           (or (and (>= (length trimmed) 9)
+                                                    (string-equal (subseq trimmed 0 9) \"<!DOCTYPE\"))
+                                               (and (>= (length trimmed) 5)
+                                                    (string-equal (subseq trimmed 0 5) \"<html\")))))
+                                    (list :html obj))
                                    (t (list :unknown (type-of obj) (princ-to-string obj)))))))"
                         trimmed))
          (result (backend-eval-internal query)))
@@ -1309,6 +1325,14 @@ Examples:
                  (members (third parsed)))
              (open-venn-panel (list trimmed) (list members) trimmed)
              (format t "~&; Visualizing FSet set (~A members)~%" count)))
+          (:svg
+           (let ((content (second parsed)))
+             (open-svg-panel "SVG" content)
+             (format t "~&; Visualizing SVG content~%")))
+          (:html
+           (let ((content (second parsed)))
+             (open-html-panel "HTML" content)
+             (format t "~&; Visualizing HTML content~%")))
           (:symbol
            (format t "~&; Symbol ~A is not a class name~%" (second parsed)))
           (:unknown

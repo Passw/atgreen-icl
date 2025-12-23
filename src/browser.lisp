@@ -539,20 +539,24 @@
 (defun refresh-browser-lists ()
   "Refresh package lists for all connected browser clients.
    Called after REPL evaluation to pick up new definitions."
-  (when (and *repl-resource* *browser-terminal-active*)
-    (ignore-errors
-      (dolist (client (hunchensocket:clients *repl-resource*))
-        (send-packages-list client)))))
+  (when *repl-resource*
+    (let ((clients (hunchensocket:clients *repl-resource*)))
+      (when clients
+        (ignore-errors
+          (dolist (client clients)
+            (send-packages-list client)))))))
 
 (defun refresh-browser-visualizations ()
   "Signal browser to refresh visualization panels (hash-tables, class graphs).
    Called after REPL evaluation to pick up data changes."
-  (when (and *repl-resource* *browser-terminal-active*)
-    (ignore-errors
-      (dolist (client (hunchensocket:clients *repl-resource*))
-        (let ((obj (make-hash-table :test 'equal)))
-          (setf (gethash "type" obj) "refresh-visualizations")
-          (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj)))))))
+  (when *repl-resource*
+    (let ((clients (hunchensocket:clients *repl-resource*)))
+      (when clients
+        (ignore-errors
+          (dolist (client clients)
+            (let ((obj (make-hash-table :test 'equal)))
+              (setf (gethash "type" obj) "refresh-visualizations")
+              (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj)))))))))
 
 (defun open-speedscope-panel (profile-id &optional title)
   "Send message to browser to open a Speedscope panel for PROFILE-ID."
@@ -710,11 +714,20 @@
       ;; Parse the source expression to extract individual set expressions
       (let* ((expressions (uiop:split-string source-expr :separator " "))
              (expressions (remove-if (lambda (s) (zerop (length s))) expressions))
-             (query (format nil "(let ((sets (list ~{~A~^ ~})))
-                                   (if (every #'fset:set? sets)
+             (query (format nil "(let ((sets (list ~{~A~^ ~}))
+                                   (fset-pkg (find-package :fset))
+                                   (fset-set?-sym nil)
+                                   (fset-convert-sym nil))
+                                   (when fset-pkg
+                                     (setf fset-set?-sym (intern \"SET?\" fset-pkg))
+                                     (setf fset-convert-sym (intern \"CONVERT\" fset-pkg)))
+                                   (if (and fset-set?-sym (fboundp fset-set?-sym)
+                                            (every (lambda (s)
+                                                     (funcall (symbol-function fset-set?-sym) s))
+                                                   sets))
                                        (list :members
                                              (mapcar (lambda (s)
-                                                       (loop for m in (fset:convert 'list s)
+                                                       (loop for m in (funcall (symbol-function fset-convert-sym) 'list s)
                                                              for i from 0 below 50
                                                              collect (princ-to-string m)))
                                                      sets))
@@ -770,6 +783,26 @@
         (setf (gethash "setMembers" obj)
               (mapcar (lambda (members) (coerce members 'vector)) set-members))
         (setf (gethash "sourceExpr" obj) source-expr)
+        (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
+
+(defun open-svg-panel (title content)
+  "Send message to browser to open an SVG visualization panel."
+  (when *repl-resource*
+    (dolist (client (hunchensocket:clients *repl-resource*))
+      (let ((obj (make-hash-table :test 'equal)))
+        (setf (gethash "type" obj) "open-svg")
+        (setf (gethash "title" obj) title)
+        (setf (gethash "content" obj) content)
+        (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
+
+(defun open-html-panel (title content)
+  "Send message to browser to open an HTML visualization panel."
+  (when *repl-resource*
+    (dolist (client (hunchensocket:clients *repl-resource*))
+      (let ((obj (make-hash-table :test 'equal)))
+        (setf (gethash "type" obj) "open-html")
+        (setf (gethash "title" obj) title)
+        (setf (gethash "content" obj) content)
         (hunchensocket:send-text-message client (com.inuoe.jzon:stringify obj))))))
 
 (defun needs-case-escape-p (str)
@@ -1326,6 +1359,12 @@
         case 'open-hash-table':
           openHashTablePanel(msg.title, msg.count, msg.entries, msg.sourceExpr);
           break;
+        case 'open-svg':
+          openSvgPanel(msg.title, msg.content);
+          break;
+        case 'open-html':
+          openHtmlPanel(msg.title, msg.content);
+          break;
         case 'refresh-visualizations':
           refreshAllVisualizations();
           break;
@@ -1425,6 +1464,38 @@
         });
       } else {
         console.error('dockviewApi not available');
+      }
+    }
+
+    // Open SVG panel
+    let svgCounter = 0;
+    function openSvgPanel(title, content) {
+      console.log('openSvgPanel called:', title, content?.length);
+      const panelId = 'svg-' + (++svgCounter);
+      if (dockviewApi) {
+        dockviewApi.addPanel({
+          id: panelId,
+          component: 'svg',
+          title: title || 'SVG',
+          params: { content },
+          position: { referencePanel: 'terminal', direction: 'right' }
+        });
+      }
+    }
+
+    // Open HTML panel
+    let htmlCounter = 0;
+    function openHtmlPanel(title, content) {
+      console.log('openHtmlPanel called:', title, content?.length);
+      const panelId = 'html-' + (++htmlCounter);
+      if (dockviewApi) {
+        dockviewApi.addPanel({
+          id: panelId,
+          component: 'html',
+          title: title || 'HTML',
+          params: { content },
+          position: { referencePanel: 'terminal', direction: 'right' }
+        });
       }
     }
 
@@ -1942,6 +2013,45 @@
 
         html += '</tbody></table></div>';
         this._element.innerHTML = html;
+      }
+    }
+
+    // SVG Panel - renders SVG content directly
+    class SvgPanel {
+      constructor() {
+        this._element = document.createElement('div');
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);overflow:auto;display:flex;align-items:center;justify-content:center;';
+      }
+      get element() { return this._element; }
+      init(params) {
+        const content = params.params?.content || '';
+        this._element.innerHTML = content;
+        // Scale SVG to fit if needed
+        const svg = this._element.querySelector('svg');
+        if (svg) {
+          svg.style.maxWidth = '100%';
+          svg.style.maxHeight = '100%';
+          svg.style.width = 'auto';
+          svg.style.height = 'auto';
+        }
+      }
+    }
+
+    // HTML Panel - renders HTML content in a sandboxed iframe
+    class HtmlPanel {
+      constructor() {
+        this._element = document.createElement('div');
+        this._element.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;background:var(--bg-primary);';
+      }
+      get element() { return this._element; }
+      init(params) {
+        const content = params.params?.content || '';
+        // Use srcdoc for sandboxed HTML rendering
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'width:100%;height:100%;border:none;background:white;';
+        iframe.sandbox = 'allow-same-origin';  // Minimal permissions
+        iframe.srcdoc = content;
+        this._element.appendChild(iframe);
       }
     }
 
@@ -2958,6 +3068,8 @@
           case 'dynamic-inspector': return new DynamicInspectorPanel();
           case 'speedscope': return new SpeedscopePanel();
           case 'hashtable': return new HashTablePanel();
+          case 'svg': return new SvgPanel();
+          case 'html': return new HtmlPanel();
           case 'venn': return new VennPanel();
           case 'graphviz': return new GraphvizPanel();
           case 'terminal': return new TerminalPanel();

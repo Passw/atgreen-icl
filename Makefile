@@ -1,6 +1,6 @@
 SLYNK_DIR := $(wildcard ocicl/sly-*/slynk)
 
-.PHONY: all clean
+.PHONY: all clean lint
 
 all: icl
 
@@ -20,3 +20,6 @@ icl: slynk.zip src/*.lisp *.asd
 
 clean:
 	rm -rf *~ icl slynk.zip
+
+lint:
+	ocicl lint src/

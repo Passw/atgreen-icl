@@ -3276,11 +3276,7 @@
                                          (cl:symbol-value (cl:quote cl-user::*icl-eval-generation*))
                                          0)
                                  *slynk-connection*)))))
-                   ;; DEBUG
-                   (format *error-output* "~&; POLLER: gen=~S last=~S~%" gen *last-eval-generation*)
-                   (force-output *error-output*)
                    (when (and gen (numberp gen) (/= gen *last-eval-generation*))
-                     (format *error-output* "~&; POLLER: Refreshing visualizations!~%")
                      (setf *last-eval-generation* gen)
                      ;; Don't refresh on first poll (gen was -1)
                      (when (>= *last-eval-generation* 0)

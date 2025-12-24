@@ -133,7 +133,6 @@ Returns a list where the first element is a keyword indicating the type:
   (:svg string) - Render SVG graphics
   (:json string) - Display formatted JSON
   (:table title columns rows) - Display a data table
-  (:vega-lite spec) - Render Vega-Lite chart specification
   (:image-base64 mime-type base64-string) - Display image from base64
   (:text string) - Display plain text
 Return NIL to use default ICL visualization.\"))

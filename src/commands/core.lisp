@@ -1220,14 +1220,20 @@ Examples:
 (defun viz-single-expression (trimmed)
   "Visualize a single expression - detect type and dispatch."
   ;; Query backend to determine type and get visualization data
+  ;; First checks for custom icl-runtime:visualize method, then falls back to built-in detection
   (let* ((query (format nil "(let ((obj ~A)
-                               (fset-pkg (find-package :fset)))
-                             (flet ((fset-sym (name)
-                                      (and fset-pkg (intern name fset-pkg)))
-                                    (fset-fn (name)
-                                      (and fset-pkg
-                                           (let ((s (intern name fset-pkg)))
-                                             (and (fboundp s) (symbol-function s))))))
+                               (fset-pkg (find-package :fset))
+                               (custom-viz (and (find-package :icl-runtime)
+                                                (fboundp 'icl-runtime:visualize)
+                                                (icl-runtime:visualize obj))))
+                           (if custom-viz
+                               custom-viz
+                               (flet ((fset-sym (name)
+                                        (and fset-pkg (intern name fset-pkg)))
+                                      (fset-fn (name)
+                                        (and fset-pkg
+                                             (let ((s (intern name fset-pkg)))
+                                               (and (fboundp s) (symbol-function s))))))
                                (let ((set?-fn (fset-fn \"SET?\"))
                                      (map?-fn (fset-fn \"MAP?\"))
                                      (bag?-fn (fset-fn \"BAG?\"))
@@ -1332,7 +1338,7 @@ Examples:
                                                   ((and (= (aref obj 0) #x47) (= (aref obj 1) #x49)) \"image/gif\")
                                                   (t \"image/webp\"))))
                                       (list :image-bytes mime (icl-runtime:usb8-array-to-base64-string obj))))
-                                   (t (list :unknown (type-of obj) (princ-to-string obj)))))))"
+                                   (t (list :unknown (type-of obj) (princ-to-string obj))))))))"
                         trimmed))
          (result (backend-eval-internal query)))
     (when (and result (listp result) (first result))

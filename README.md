@@ -305,6 +305,34 @@ JSON strings are automatically pretty-printed with syntax highlighting:
 
 All visualization panels auto-refresh after REPL evaluations.
 
+#### Custom Visualizations
+
+Define methods on `icl-runtime:visualize` to create custom visualizations for your own classes:
+
+```lisp
+;; Visualize a game board as HTML
+(defmethod icl-runtime:visualize ((obj my-game-state))
+  (list :html (render-board-html obj)))
+
+;; Visualize data as SVG chart
+(defmethod icl-runtime:visualize ((obj my-data-series))
+  (list :svg (generate-chart-svg obj)))
+
+;; Visualize config as JSON
+(defmethod icl-runtime:visualize ((obj my-config))
+  (list :json (serialize-to-json obj)))
+```
+
+Supported visualization types:
+- `(:html string)` - Render HTML in sandboxed iframe
+- `(:svg string)` - Render SVG graphics
+- `(:json string)` - Syntax-highlighted JSON
+- `(:table title columns rows)` - Data table with headers
+- `(:image-base64 mime-type base64-string)` - Image from base64 data
+- `(:text string)` - Plain text display
+
+Return `NIL` from your method to fall back to ICL's built-in type detection.
+
 ### Configuration
 
 | Command | Description |

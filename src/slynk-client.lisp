@@ -61,7 +61,8 @@
          (:use #:cl)
          (:export #:usb8-array-to-base64-string
                   #:*eval-generation*
-                  #:setup-eval-generation-hook)))
+                  #:setup-eval-generation-hook
+                  #:visualize)))
      t)"
   "Phase 1: Create the ICL runtime package.")
 
@@ -123,7 +124,23 @@
                      (prog1 (funcall *original-listener-eval* string)
                        (incf *eval-generation*)))))))
        (setf *eval-hook-installed* t))
-     t)"
+     t)
+   ;; Custom visualization generic function
+   (defgeneric visualize (object)
+     (:documentation \"Return a visualization specification for OBJECT.
+Returns a list where the first element is a keyword indicating the type:
+  (:html string) - Render HTML in sandboxed iframe
+  (:svg string) - Render SVG graphics
+  (:json string) - Display formatted JSON
+  (:table title columns rows) - Display a data table
+  (:vega-lite spec) - Render Vega-Lite chart specification
+  (:image-base64 mime-type base64-string) - Display image from base64
+  (:text string) - Display plain text
+Return NIL to use default ICL visualization.\"))
+   (defmethod visualize (object)
+     \"Default method returns NIL to use built-in visualization.\"
+     (declare (ignore object))
+     nil)"
   "Phase 2: Define ICL runtime functions.")
 
 (defun inject-icl-runtime ()

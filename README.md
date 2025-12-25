@@ -513,21 +513,25 @@ flowchart TD
     subgraph ui [" "]
         Terminal
         Browser
-        Emacs["Emacs<br/>SLY/SLIME"]
+        Emacs["Emacs + SLY/SLIME"]
     end
 
     Terminal -->|stdin/stdout| ICL
     Browser <-->|HTTP + WebSocket| ICL
     Emacs -->|Slynk| Slynk
+    AI["AI CLIs"] <-.->|read-only| ICL
 
-    ICL -->|Slynk Protocol| Slynk
-    ICL <-->|HTTP| MCP
+    subgraph ICL
+        WebServer["Web Server"]
+        MCP["MCP Server"]
+        SlynkClient["Slynk Client"]
+    end
+
+    SlynkClient -->|Slynk Protocol| Slynk
 
     subgraph Lisp ["Lisp Image"]
         Slynk["Slynk Server"]
     end
-
-    MCP <-.->|read-only| AI["AI CLIs"]
 
     style ui fill:none,stroke:none
 ```

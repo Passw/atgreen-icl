@@ -510,18 +510,26 @@ ICL operates as a frontend that communicates with a backend Lisp process via the
 
 ```mermaid
 flowchart TD
-    Terminal["🖥️ Terminal"] -->|stdin/stdout| ICL
-    Browser["🌐 Browser"] <-->|HTTP + WebSocket| ICL
-    Emacs["📝 Emacs + SLY/SLIME"] -->|Slynk| Slynk
+    subgraph ui [" "]
+        Terminal
+        Browser
+        Emacs["Emacs<br/>SLY/SLIME"]
+    end
 
-    ICL["ICL"] -->|Slynk Protocol| Slynk
-    ICL <-->|HTTP| MCP["MCP Server"]
+    Terminal -->|stdin/stdout| ICL
+    Browser <-->|HTTP + WebSocket| ICL
+    Emacs -->|Slynk| Slynk
 
-    subgraph Lisp["Lisp Image (SBCL, CCL, ECL, ...)"]
+    ICL -->|Slynk Protocol| Slynk
+    ICL <-->|HTTP| MCP
+
+    subgraph Lisp ["Lisp Image"]
         Slynk["Slynk Server"]
     end
 
-    MCP <-.->|read-only| AI["AI CLIs<br/>(Claude, Gemini, Codex)"]
+    MCP <-.->|read-only| AI["AI CLIs"]
+
+    style ui fill:none,stroke:none
 ```
 
 All connections use randomly-assigned ports on localhost. When ICL starts an inferior Lisp, it finds an available port and configures Slynk to listen there. The browser interface (started with `,browser` or `icl -b`) serves a Dockview-based IDE with package browser, symbol list, inspector panels, and class hierarchy visualization. The browser automatically closes when ICL terminates. The MCP server (started on-demand by `,explain`) provides read-only AI tool integration.

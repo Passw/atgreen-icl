@@ -45,13 +45,13 @@ slynk.zip: $(SLYNK_DIR)/*
 	     --eval "(zip:zip \"slynk.zip\" \"$(SLYNK_DIR)/\" :if-exists :supersede)" \
 	     --quit
 
-icl: slynk.zip assets/OPEN-SOURCE-NOTICES.txt src/*.lisp *.asd
+icl: slynk.zip src/*.lisp *.asd
 	sbcl --eval "(require 'asdf)" \
 	     --eval "(asdf:initialize-source-registry (list :source-registry :inherit-configuration (list :directory (uiop:getcwd)) (list :tree (merge-pathnames \"ocicl/\" (uiop:getcwd))) (list :tree (merge-pathnames \"3rd-party/\" (uiop:getcwd)))))" \
 	     --eval "(asdf:make :icl)" --quit
 
 clean:
-	rm -rf *~ icl slynk.zip assets/OPEN-SOURCE-NOTICES.txt
+	rm -rf *~ icl slynk.zip
 
 lint:
 	ocicl lint icl.asd

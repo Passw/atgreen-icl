@@ -141,3 +141,24 @@ body { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: va
   font-weight: 500;
 }
 .about-close:hover { background: var(--accent-hover); }
+
+/* Connection status indicator */
+.connection-status {
+  position: fixed;
+  top: 10px;
+  right: 48px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  z-index: 100;
+}
+.connection-status.connected { background: #40a02b; }
+.connection-status.disconnected { background: #d20f39; }
+
+/* Empty state messages */
+.empty-state {
+  color: var(--fg-muted);
+  font-style: italic;
+  padding: 16px;
+  text-align: center;
+}

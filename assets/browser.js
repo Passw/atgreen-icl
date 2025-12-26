@@ -81,15 +81,29 @@ let classGraphCounter = 0;
 const graphvizStates = new Map();  // panelId -> GraphvizPanel instance
 const pendingClassGraphs = new Map();  // panelId -> pending graph messages
 
+// Connection status indicator
+function updateConnectionStatus(connected) {
+  const indicator = document.getElementById('connection-status');
+  if (indicator) {
+    indicator.className = 'connection-status ' + (connected ? 'connected' : 'disconnected');
+    indicator.title = connected ? 'Connected' : 'Disconnected';
+  }
+}
+
 ws.onopen = () => {
   console.log('Connected');
+  updateConnectionStatus(true);
   // Send dark mode preference for theme auto-selection
   sendDarkModePreference();
   ws.send(JSON.stringify({type: 'get-packages'}));
+  // Request Lisp info to update tab title
+  ws.send(JSON.stringify({ type: 'get-lisp-info' }));
 };
 
 ws.onclose = () => {
   console.log('Connection closed - ICL process terminated');
+  updateConnectionStatus(false);
+  document.title = 'ICL - Disconnected';
   // Close the browser window/tab when ICL dies
   window.close();
   // If window.close() doesn't work (e.g., not opened by script), show message
@@ -98,6 +112,7 @@ ws.onclose = () => {
 
 ws.onerror = (err) => {
   console.error('WebSocket error:', err);
+  updateConnectionStatus(false);
 };
 
 ws.onmessage = (e) => {
@@ -134,6 +149,10 @@ ws.onmessage = (e) => {
       applyTheme(msg.data);
       break;
     case 'lisp-info':
+      // Update browser tab title
+      if (msg['lisp-type'] && msg['lisp-version']) {
+        document.title = 'ICL - ' + msg['lisp-type'] + ' ' + msg['lisp-version'];
+      }
       // Update About dialog if open
       const lispInfoEl = document.getElementById('about-lisp-info');
       if (lispInfoEl) {
@@ -1011,9 +1030,17 @@ function renderPackages(filter = '') {
 function renderSymbols(filter = '') {
   const el = document.getElementById('symbol-list');
   if (!el) return;
+  if (!selectedPackage) {
+    el.innerHTML = '<div class="empty-state">Select a package to see symbols</div>';
+    return;
+  }
   const f = filter.toLowerCase();
-  el.innerHTML = (symbols || [])
-    .filter(s => !f || s[0].toLowerCase().includes(f))
+  const filtered = (symbols || []).filter(s => !f || s[0].toLowerCase().includes(f));
+  if (filtered.length === 0) {
+    el.innerHTML = '<div class="empty-state">' + (f ? 'No matching symbols' : 'No symbols in package') + '</div>';
+    return;
+  }
+  el.innerHTML = filtered
     .map(s => {
       const [name] = s;
       const selected = (selectedSymbol && name.toUpperCase() === selectedSymbol.toUpperCase()) ? 'selected' : '';
@@ -1252,7 +1279,7 @@ class InspectorPanel {
     this._element.className = 'panel';
     this._element.innerHTML = `
       <div class='panel-content detail-content' id='detail-content'>
-        Click a symbol to see its bindings.
+        <div class="empty-state">Select a symbol to see details</div>
       </div>`;
   }
   get element() { return this._element; }
@@ -2596,6 +2623,13 @@ document.addEventListener('keydown', (e) => {
     api.exitMaximizedGroup();
   }
 });
+
+// Create connection status indicator
+const connStatus = document.createElement('div');
+connStatus.id = 'connection-status';
+connStatus.className = 'connection-status connected';
+connStatus.title = 'Connected';
+document.body.appendChild(connStatus);
 
 // Create menu button
 const menuBtn = document.createElement('button');

@@ -57,7 +57,18 @@
         (let ((path (merge-pathnames filename speedscope-dir)))
           (when (probe-file path)
             (setf (gethash (concatenate 'string "speedscope/" filename) *embedded-binary-assets*)
-                  (alexandria:read-file-into-byte-vector path))))))))
+                  (alexandria:read-file-into-byte-vector path))))))
+    ;; ICL favicon assets
+    (dolist (filename '("favicon.ico"
+                        "favicon-16.png"
+                        "favicon-32.png"
+                        "favicon-48.png"
+                        "favicon-192.png"
+                        "apple-touch-icon.png"))
+      (let ((path (merge-pathnames filename assets-dir)))
+        (when (probe-file path)
+          (setf (gethash filename *embedded-binary-assets*)
+                (alexandria:read-file-into-byte-vector path)))))))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Asset Access

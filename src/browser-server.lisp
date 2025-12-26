@@ -60,17 +60,29 @@
                  (cond
                    ((alexandria:ends-with-subseq ".css" filename) "text/css")
                    ((alexandria:ends-with-subseq ".js" filename) "application/javascript")
-                   (t "application/octet-stream")))))
-    ;; First try embedded assets
+                   ((alexandria:ends-with-subseq ".png" filename) "image/png")
+                   ((alexandria:ends-with-subseq ".ico" filename) "image/x-icon")
+                   (t "application/octet-stream"))))
+         (binary-asset-p ()
+           (or (alexandria:ends-with-subseq ".png" filename)
+               (alexandria:ends-with-subseq ".ico" filename))))
+    ;; First try embedded text assets
     (let ((embedded (get-embedded-asset filename)))
       (when embedded
         (set-content-type)
         (return-from serve-asset embedded)))
+    ;; Try embedded binary assets (favicons, images)
+    (let ((binary (get-embedded-binary-asset filename)))
+      (when binary
+        (set-content-type)
+        (return-from serve-asset binary)))
     ;; Fall back to filesystem (for development)
     (let ((filepath (merge-pathnames filename (get-assets-directory))))
       (when (probe-file filepath)
         (set-content-type)
-        (alexandria:read-file-into-string filepath)))))
+        (if (binary-asset-p)
+            (alexandria:read-file-into-byte-vector filepath)
+            (alexandria:read-file-into-string filepath))))))
 
 (defun serve-speedscope-asset (filename)
   "Serve a speedscope asset file."

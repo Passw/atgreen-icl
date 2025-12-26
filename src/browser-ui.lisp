@@ -22,6 +22,12 @@
 <head>
   <meta charset='utf-8'>
   <title>ICL Browser</title>
+  <link rel='icon' type='image/x-icon' href='/assets/favicon.ico'>
+  <link rel='icon' type='image/png' sizes='16x16' href='/assets/favicon-16.png'>
+  <link rel='icon' type='image/png' sizes='32x32' href='/assets/favicon-32.png'>
+  <link rel='icon' type='image/png' sizes='48x48' href='/assets/favicon-48.png'>
+  <link rel='icon' type='image/png' sizes='192x192' href='/assets/favicon-192.png'>
+  <link rel='apple-touch-icon' href='/assets/apple-touch-icon.png'>
   <link rel='stylesheet' href='/assets/dockview.css'>
   <link rel='stylesheet' href='/assets/xterm.css'>
   <link rel='stylesheet' href='/assets/browser.css'>

@@ -4,6 +4,38 @@ SLYNK_DIR := $(wildcard ocicl/sly-*/slynk)
 
 all: icl
 
+assets/OPEN-SOURCE-NOTICES.txt: assets/WEB-LICENSES ocicl.csv
+	@echo "Generating OPEN-SOURCE-NOTICES.txt..."
+	@echo "================================================================================" > $@
+	@echo "ICL OPEN SOURCE NOTICES" >> $@
+	@echo "================================================================================" >> $@
+	@echo "" >> $@
+	@echo "Interactive Common Lisp (ICL) is built using many open source components." >> $@
+	@echo "This document contains the license notices for all third-party software" >> $@
+	@echo "used in ICL." >> $@
+	@echo "" >> $@
+	@echo "ICL itself is licensed under the MIT License." >> $@
+	@echo "Copyright (C) 2025 Anthony Green <green@moxielogic.com>" >> $@
+	@echo "" >> $@
+	@echo "================================================================================" >> $@
+	@echo "TABLE OF CONTENTS" >> $@
+	@echo "================================================================================" >> $@
+	@echo "" >> $@
+	@echo "PART 1: Web Browser Components" >> $@
+	@echo "PART 2: Common Lisp Libraries" >> $@
+	@echo "" >> $@
+	@echo "================================================================================" >> $@
+	@echo "PART 1: WEB BROWSER COMPONENTS" >> $@
+	@echo "================================================================================" >> $@
+	@echo "" >> $@
+	@cat assets/WEB-LICENSES >> $@
+	@echo "" >> $@
+	@echo "================================================================================" >> $@
+	@echo "PART 2: COMMON LISP LIBRARIES" >> $@
+	@echo "================================================================================" >> $@
+	@echo "" >> $@
+	@ocicl collect-licenses 2>/dev/null >> $@
+
 slynk.zip: $(SLYNK_DIR)/*
 	@echo "Creating slynk.zip..."
 	sbcl --non-interactive \
@@ -13,13 +45,13 @@ slynk.zip: $(SLYNK_DIR)/*
 	     --eval "(zip:zip \"slynk.zip\" \"$(SLYNK_DIR)/\" :if-exists :supersede)" \
 	     --quit
 
-icl: slynk.zip src/*.lisp *.asd
+icl: slynk.zip assets/OPEN-SOURCE-NOTICES.txt src/*.lisp *.asd
 	sbcl --eval "(require 'asdf)" \
 	     --eval "(asdf:initialize-source-registry (list :source-registry :inherit-configuration (list :directory (uiop:getcwd)) (list :tree (merge-pathnames \"ocicl/\" (uiop:getcwd))) (list :tree (merge-pathnames \"3rd-party/\" (uiop:getcwd)))))" \
 	     --eval "(asdf:make :icl)" --quit
 
 clean:
-	rm -rf *~ icl slynk.zip
+	rm -rf *~ icl slynk.zip assets/OPEN-SOURCE-NOTICES.txt
 
 lint:
 	ocicl lint icl.asd

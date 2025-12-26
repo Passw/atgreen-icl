@@ -272,7 +272,8 @@
     (error () nil))
   (when *paredit-mode*
     (format t " [paredit]"))
-  (format t "~%Type ,help for commands, ,quit to exit.~2%"))
+  (format t "~%by Anthony Green • https://github.com/atgreen/icl~%")
+  (format t "Type ,help for commands, ,quit to exit.~2%"))
 
 ;;; ─────────────────────────────────────────────────────────────────────────────
 ;;; Formatted Output

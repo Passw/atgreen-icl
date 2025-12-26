@@ -30,9 +30,17 @@
                         "xterm.css"
                         "xterm-addon-fit.min.js"
                         "viz-standalone.js"
+                        "highlight.min.js"
+                        "hljs-github-dark.min.css"
+                        "hljs-github.min.css"
+                        "vega.min.js"
+                        "vega-lite.min.js"
+                        "vega-embed.min.js"
+                        "mermaid.min.js"
                         "browser.css"
                         "browser.js"
-                        "WEB-LICENSES"))
+                        "WEB-LICENSES"
+                        "OPEN-SOURCE-NOTICES.txt"))
       (let ((path (merge-pathnames filename assets-dir)))
         (when (probe-file path)
           (setf (gethash filename *embedded-assets*)

@@ -31,7 +31,7 @@
   <link rel='stylesheet' href='/assets/dockview.css'>
   <link rel='stylesheet' href='/assets/xterm.css'>
   <link rel='stylesheet' href='/assets/browser.css'>
-  <link rel='stylesheet' href='https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css' id='hljs-theme'>
+  <link rel='stylesheet' href='/assets/hljs-github-dark.min.css' id='hljs-theme'>
 </head>
 <body>
   <div id='layout-container'></div>
@@ -41,18 +41,18 @@
   <script src='/assets/xterm.min.js'></script>
   <script src='/assets/xterm-addon-fit.min.js'></script>
   <script src='/assets/viz-standalone.js'></script>
-  <script src='https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js'></script>
-  <script src='https://cdn.jsdelivr.net/npm/vega@5'></script>
-  <script src='https://cdn.jsdelivr.net/npm/vega-lite@5'></script>
-  <script src='https://cdn.jsdelivr.net/npm/vega-embed@6'></script>
-  <script src='https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'></script>
+  <script src='/assets/highlight.min.js'></script>
+  <script src='/assets/vega.min.js'></script>
+  <script src='/assets/vega-lite.min.js'></script>
+  <script src='/assets/vega-embed.min.js'></script>
+  <script src='/assets/mermaid.min.js'></script>
 
   <!-- Configuration (injected by server) -->
   <script>
-    const ICL_CONFIG = { wsToken: '~A' };
+    const ICL_CONFIG = { wsToken: '~A', version: '~A' };
   </script>
 
   <!-- Main application script -->
   <script src='/assets/browser.js'></script>
 </body>
-</html>" *browser-token*))
+</html>" *browser-token* +version+))

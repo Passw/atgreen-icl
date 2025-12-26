@@ -31,21 +31,11 @@ jobs:
       - name: Fetch Lisp dependencies
         run: ocicl install
 
-      - name: Collect third-party licenses
-        run: ocicl collect-licenses > THIRD-PARTY-LICENSES.txt
-
       - name: Upload ocicl directory
         uses: actions/upload-artifact@v4
         with:
           name: ocicl-deps
           path: ocicl
-          retention-days: 1
-
-      - name: Upload licenses file
-        uses: actions/upload-artifact@v4
-        with:
-          name: licenses
-          path: THIRD-PARTY-LICENSES.txt
           retention-days: 1
 
   # ========================================
@@ -65,11 +55,6 @@ jobs:
         with:
           name: ocicl-deps
           path: ocicl
-
-      - name: Download licenses
-        uses: actions/download-artifact@v4
-        with:
-          name: licenses
 
       - name: Install build dependencies
         run: |
@@ -122,11 +107,6 @@ jobs:
         with:
           name: ocicl-deps
           path: ocicl
-
-      - name: Download licenses
-        uses: actions/download-artifact@v4
-        with:
-          name: licenses
 
       - name: Install build dependencies
         run: |
@@ -181,11 +161,6 @@ jobs:
           name: ocicl-deps
           path: ocicl
 
-      - name: Download licenses
-        uses: actions/download-artifact@v4
-        with:
-          name: licenses
-
       - name: Install SBCL and build tools
         shell: powershell
         run: |
@@ -205,7 +180,8 @@ jobs:
         run: |
           $VERSION = "${{ steps.version.outputs.version }}"
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item icl.exe, README.md, LICENSE, THIRD-PARTY-LICENSES.txt -Destination dist/
+          Copy-Item icl.exe, README.md, LICENSE -Destination dist/
+          Copy-Item "assets/OPEN-SOURCE-NOTICES.txt" -Destination dist/
           # Include slynk for backend support
           $slynkDir = Get-ChildItem -Path ocicl -Filter "sly-*" -Directory | Select-Object -First 1
           if ($slynkDir) {
@@ -237,13 +213,11 @@ jobs:
           Copy-Item "icl.exe" "releng\installer\wix\"
           Copy-Item "LICENSE" "releng\installer\wix\"
           Copy-Item "README.md" "releng\installer\wix\"
-          Copy-Item "THIRD-PARTY-LICENSES.txt" "releng\installer\wix\"
+          Copy-Item "assets/OPEN-SOURCE-NOTICES.txt" "releng\installer\wix\"
           Copy-Item "icl.el" "releng\installer\wix\"
           Copy-Item "icl-autoloads.el" "releng\installer\wix\"
           # Copy bundled ASDF
           Copy-Item -Recurse "3rd-party" "releng\installer\wix\"
-          # Copy web assets (including WEB-LICENSES)
-          Copy-Item -Recurse "assets" "releng\installer\wix\"
           cd releng\installer\wix
           wix build icl.wxs -o "..\..\..\icl-$VERSION.msi" -d VERSION=$VERSION -d SourceDir=. -ext WixToolset.UI.wixext
 
@@ -345,11 +319,6 @@ jobs:
           name: ocicl-deps
           path: ocicl
 
-      - name: Download licenses
-        uses: actions/download-artifact@v4
-        with:
-          name: licenses
-
       - name: Install dependencies
         run: |
           brew install sbcl libfixposix
@@ -362,7 +331,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
           cp icl dist/
-          cp README.md LICENSE THIRD-PARTY-LICENSES.txt dist/
+          cp README.md LICENSE assets/OPEN-SOURCE-NOTICES.txt dist/
           # Include slynk for backend support
           cp -r ocicl/sly-*/slynk dist/
           # Include bundled ASDF (for Lisps that don't bundle it)
@@ -388,11 +357,6 @@ jobs:
           name: ocicl-deps
           path: ocicl
 
-      - name: Download licenses
-        uses: actions/download-artifact@v4
-        with:
-          name: licenses
-
       - name: Install dependencies
         run: |
           brew install sbcl libfixposix
@@ -405,7 +369,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
           cp icl dist/
-          cp README.md LICENSE THIRD-PARTY-LICENSES.txt dist/
+          cp README.md LICENSE assets/OPEN-SOURCE-NOTICES.txt dist/
           # Include slynk for backend support
           cp -r ocicl/sly-*/slynk dist/
           # Include bundled ASDF (for Lisps that don't bundle it)

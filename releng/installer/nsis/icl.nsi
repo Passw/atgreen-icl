@@ -78,8 +78,7 @@ Section "ICL Core" SEC_CORE
 
   ; Install license and readme
   File "..\..\..\LICENSE"
-  File "..\..\..\THIRD-PARTY-LICENSES.txt"
-  File "..\..\..\assets\WEB-LICENSES"
+  File "..\..\..\assets\OPEN-SOURCE-NOTICES.txt"
   File "..\..\..\README.md"
 
   ; Install Emacs integration
@@ -160,8 +159,7 @@ Section "Uninstall"
   ; Remove files
   Delete "$INSTDIR\icl.exe"
   Delete "$INSTDIR\LICENSE"
-  Delete "$INSTDIR\THIRD-PARTY-LICENSES.txt"
-  Delete "$INSTDIR\WEB-LICENSES"
+  Delete "$INSTDIR\OPEN-SOURCE-NOTICES.txt"
   Delete "$INSTDIR\README.md"
   Delete "$INSTDIR\share\emacs\site-lisp\icl\icl.el"
   Delete "$INSTDIR\share\emacs\site-lisp\icl\icl-autoloads.el"

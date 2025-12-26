@@ -34,8 +34,6 @@ helper commands to explore and evaluate Common Lisp code quickly.
 make
 
 %install
-# Use pre-generated third-party licenses (included in source tarball)
-
 # Install the binary
 install -D -m 0755 icl %{buildroot}%{_bindir}/icl
 
@@ -58,11 +56,8 @@ install -m 0644 icl-autoloads.el %{buildroot}%{_datadir}/emacs/site-lisp/icl/
 
 # Note: Slynk and browser assets are now embedded in the binary
 
-# Install web asset licenses (JS/CSS libraries)
-install -D -m 0644 assets/WEB-LICENSES %{buildroot}%{_datadir}/licenses/%{name}/WEB-LICENSES
-
-# Install collected vendored licenses
-install -D -m 0644 THIRD-PARTY-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{name}/THIRD-PARTY-LICENSES.txt
+# Install combined open source notices (web + Lisp licenses)
+install -D -m 0644 assets/OPEN-SOURCE-NOTICES.txt %{buildroot}%{_datadir}/licenses/%{name}/OPEN-SOURCE-NOTICES.txt
 
 %post
 /sbin/ldconfig
@@ -72,8 +67,7 @@ install -D -m 0644 THIRD-PARTY-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{n
 
 %files
 %license LICENSE
-%license %{_datadir}/licenses/%{name}/WEB-LICENSES
-%license %{_datadir}/licenses/%{name}/THIRD-PARTY-LICENSES.txt
+%license %{_datadir}/licenses/%{name}/OPEN-SOURCE-NOTICES.txt
 %doc README.md
 %{_sysconfdir}/ld.so.conf.d/icl.conf
 %{_datadir}/icl/asdf
@@ -82,6 +76,9 @@ install -D -m 0644 THIRD-PARTY-LICENSES.txt %{buildroot}%{_datadir}/licenses/%{n
 %{_bindir}/icl
 
 %changelog
+* Thu Dec 26 2025 Anthony Green <green@moxielogic.com> - 0.1.0-3
+- Use combined OPEN-SOURCE-NOTICES.txt for all third-party licenses
+
 * Sat Dec 13 2025 Anthony Green <green@moxielogic.com> - 0.1.0-2
 - Collect vendored licenses during build and install them under /usr/share/licenses
 

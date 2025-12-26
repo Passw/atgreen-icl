@@ -60,3 +60,84 @@ body { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: va
 .binding-header { color: var(--fg-secondary); font-weight: bold; }
 .inspect-link { color: var(--accent); cursor: pointer; margin-left: 8px; font-size: 0.9em; }
 .inspect-link:hover { text-decoration: underline; color: var(--accent-hover); }
+
+/* Menu button */
+.menu-button {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--fg-primary);
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.menu-button:hover { background: var(--bg-tertiary); }
+
+/* App menu dropdown */
+.app-menu {
+  position: fixed;
+  z-index: 101;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  min-width: 150px;
+}
+.menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  color: var(--fg-primary);
+}
+.menu-item:hover { background: var(--bg-tertiary); }
+
+/* Modal backdrop and dialog */
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px;
+  min-width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+/* About dialog styling */
+.about-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+.about-logo { width: 64px; height: 64px; border-radius: 8px; }
+.about-title { margin: 0; color: var(--accent); font-size: 1.4em; }
+.about-version { color: var(--fg-muted); font-size: 0.9em; margin-top: 4px; }
+.about-description { color: var(--fg-secondary); margin: 0 0 16px 0; line-height: 1.5; }
+.about-section { margin-bottom: 8px; }
+.about-label { color: var(--fg-muted); font-size: 0.85em; }
+.about-links { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; align-items: center; }
+.about-link { color: var(--accent); text-decoration: none; }
+.about-link:hover { text-decoration: underline; color: var(--accent-hover); }
+.about-sep { color: var(--fg-muted); margin: 0 6px; }
+.about-close {
+  margin-top: 20px;
+  padding: 8px 20px;
+  background: var(--accent);
+  border: none;
+  color: var(--bg-primary);
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.about-close:hover { background: var(--accent-hover); }

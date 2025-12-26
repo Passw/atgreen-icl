@@ -5,6 +5,62 @@
  * Requires ICL_CONFIG.wsToken to be set before loading this script.
  */
 
+// About dialog
+function showAboutDialog() {
+  // Remove existing dialog if any
+  const existing = document.getElementById('about-backdrop');
+  if (existing) existing.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'about-backdrop';
+  backdrop.className = 'modal-backdrop';
+  backdrop.onclick = (e) => { if (e.target === backdrop) backdrop.remove(); };
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-dialog';
+  modal.innerHTML = `
+    <div class="about-header">
+      <img src="/assets/favicon-192.png" alt="ICL" class="about-logo">
+      <div>
+        <h2 class="about-title">Interactive Common Lisp</h2>
+        <div class="about-version">Version ${ICL_CONFIG.version}</div>
+      </div>
+    </div>
+    <p class="about-description">An enhanced REPL for Common Lisp with multi-line editing, system browser, visualization, and profiling.</p>
+    <div class="about-section">
+      <div class="about-label">Connected Lisp</div>
+      <div id="about-lisp-info">Loading...</div>
+    </div>
+    <div class="about-section">
+      <div class="about-label">Author</div>
+      <div>Anthony Green
+        <span class="about-sep">|</span>
+        <a href="https://github.com/atgreen" target="_blank" class="about-link">GitHub</a>
+        <span class="about-sep">|</span>
+        <a href="https://www.linkedin.com/in/green/" target="_blank" class="about-link">LinkedIn</a>
+      </div>
+    </div>
+    <div class="about-section">
+      <div class="about-label">License</div>
+      <div>MIT</div>
+    </div>
+    <div class="about-links">
+      <a href="https://github.com/atgreen/icl" target="_blank" class="about-link">Project on GitHub</a>
+      <span class="about-sep">|</span>
+      <a href="/assets/OPEN-SOURCE-NOTICES.txt" target="_blank" class="about-link">Open Source Notices</a>
+    </div>
+    <button onclick="this.closest('.modal-backdrop').remove()" class="about-close">Close</button>
+  `;
+
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+
+  // Request Lisp info from server
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'get-lisp-info' }));
+  }
+}
+
 // WebSocket connection
 const ws = new WebSocket('ws://' + location.host + '/ws/' + ICL_CONFIG.wsToken);
 let terminal, fitAddon;
@@ -76,6 +132,17 @@ ws.onmessage = (e) => {
       break;
     case 'theme':
       applyTheme(msg.data);
+      break;
+    case 'lisp-info':
+      // Update About dialog if open
+      const lispInfoEl = document.getElementById('about-lisp-info');
+      if (lispInfoEl) {
+        if (msg['lisp-type'] && msg['lisp-version']) {
+          lispInfoEl.textContent = msg['lisp-type'] + ' ' + msg['lisp-version'];
+        } else {
+          lispInfoEl.textContent = 'Not connected';
+        }
+      }
       break;
     case 'open-speedscope':
       openSpeedscopePanel(msg.profileId, msg.title);
@@ -853,7 +920,7 @@ function applyTheme(themeData) {
     const hljsThemeLink = document.getElementById('hljs-theme');
     if (hljsThemeLink) {
       const hljsTheme = isDark ? 'github-dark' : 'github';
-      hljsThemeLink.href = 'https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/' + hljsTheme + '.min.css';
+      hljsThemeLink.href = '/assets/hljs-' + hljsTheme + '.min.css';
     }
 
     // Re-render all Vega-Lite panels to apply new theme
@@ -2529,3 +2596,33 @@ document.addEventListener('keydown', (e) => {
     api.exitMaximizedGroup();
   }
 });
+
+// Create menu button
+const menuBtn = document.createElement('button');
+menuBtn.className = 'menu-button';
+menuBtn.innerHTML = '&#9776;';  // Hamburger icon
+menuBtn.title = 'Menu';
+menuBtn.onclick = (e) => {
+  e.stopPropagation();
+  const existing = document.getElementById('app-menu');
+  if (existing) { existing.remove(); return; }
+
+  const menu = document.createElement('div');
+  menu.id = 'app-menu';
+  menu.className = 'app-menu';
+  menu.innerHTML = `
+    <div class="menu-item" onclick="showAboutDialog(); this.parentElement.remove();">About ICL</div>
+  `;
+  menu.style.top = (menuBtn.offsetTop + menuBtn.offsetHeight + 4) + 'px';
+  menu.style.right = '8px';
+  document.body.appendChild(menu);
+
+  // Close menu on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function closeMenu() {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    }, { once: true });
+  }, 0);
+};
+document.body.appendChild(menuBtn);

@@ -131,6 +131,10 @@
            (when *current-browser-theme*
              (send-browser-theme-to-client client *current-browser-theme*)))
 
+          ;; Request Lisp implementation info
+          ((string= type "get-lisp-info")
+           (send-lisp-info client))
+
           ;; Request class hierarchy graph
           ((string= type "get-class-graph")
            (let ((class-name (gethash "className" json))
@@ -264,6 +268,17 @@
       (browser-log "ws-send: json length=~D" (length json-str))
       (hunchensocket:send-text-message client json-str)
       (browser-log "ws-send: message sent successfully"))))
+
+(defun send-lisp-info (client)
+  "Send Lisp implementation info to CLIENT."
+  (let ((info (slynk-lisp-info)))
+    (if info
+        (ws-send client "lisp-info"
+                 :lisp-type (getf info :type)
+                 :lisp-version (getf info :version))
+        (ws-send client "lisp-info"
+                 :lisp-type nil
+                 :lisp-version nil))))
 
 (defun send-packages-list (client)
   "Send list of all packages to CLIENT."

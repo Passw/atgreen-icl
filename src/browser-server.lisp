@@ -62,6 +62,7 @@
                    ((alexandria:ends-with-subseq ".js" filename) "application/javascript")
                    ((alexandria:ends-with-subseq ".png" filename) "image/png")
                    ((alexandria:ends-with-subseq ".ico" filename) "image/x-icon")
+                   ((alexandria:ends-with-subseq ".txt" filename) "text/plain")
                    (t "application/octet-stream"))))
          (binary-asset-p ()
            (or (alexandria:ends-with-subseq ".png" filename)

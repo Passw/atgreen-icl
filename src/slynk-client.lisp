@@ -203,6 +203,15 @@ Return NIL to use default ICL visualization.\"))
           (write-string string)
           (finish-output)))))
 
+;; Verify we have ICL's vendored slynk-client (with *write-string-hook* support)
+;; The upstream slynk-client from Quicklisp/Ultralisp doesn't have this feature.
+;; If this check fails, ASDF loaded the wrong version.
+(unless (boundp 'slynk-client:*write-string-hook*)
+  (error "Wrong slynk-client version loaded. ICL requires its vendored slynk-client ~
+          with *write-string-hook* support. The upstream version from Quicklisp/Ultralisp ~
+          was loaded instead. Please ensure ICL's 3rd-party/slynk-client/ is in ~
+          asdf:*central-registry* BEFORE any Quicklisp dist directories."))
+
 (setf slynk-client:*write-string-hook* #'write-slynk-string-to-active-repl)
 
 (defun slynk-eval-form (string &key (package "CL-USER"))
@@ -523,3 +532,14 @@ Returns (values output-string value-strings). Does not print to the local REPL."
   (slynk-client:slime-eval
    `(cl:funcall (cl:read-from-string "slynk:list-threads"))
    *slynk-connection*))
+
+(defun slynk-lisp-info ()
+  "Get the Lisp implementation type and version from the backend.
+   Returns a plist with :type and :version keys, or NIL if not connected."
+  (when *slynk-connected-p*
+    (handler-case
+        (slynk-client:slime-eval
+         '(cl:list :type (cl:lisp-implementation-type)
+                   :version (cl:lisp-implementation-version))
+         *slynk-connection*)
+      (error () nil))))

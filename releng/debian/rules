@@ -22,8 +22,7 @@ override_dh_auto_install:
 	# Note: Slynk and browser assets are now embedded in the binary
 	install -m 0644 README.md debian/icl/usr/share/doc/icl/
 	install -m 0644 LICENSE debian/icl/usr/share/doc/icl/
-	install -m 0644 THIRD-PARTY-LICENSES.txt debian/icl/usr/share/doc/icl/
-	install -m 0644 assets/WEB-LICENSES debian/icl/usr/share/doc/icl/
+	install -m 0644 assets/OPEN-SOURCE-NOTICES.txt debian/icl/usr/share/doc/icl/
 	# Emacs integration
 	install -m 0644 icl.el debian/icl/usr/share/emacs/site-lisp/icl/
 	install -m 0644 icl-autoloads.el debian/icl/usr/share/emacs/site-lisp/icl/
